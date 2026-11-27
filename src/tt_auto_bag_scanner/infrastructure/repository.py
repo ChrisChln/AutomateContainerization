@@ -888,7 +888,9 @@ class TaskRepository:
                     return
                 raise RepositoryError("only an in-flight attempt can become unknown")
             item = connection.execute(
-                "SELECT task_id FROM task_items WHERE id = ?", (attempt["item_id"],)
+                """SELECT i.task_id, t.state FROM task_items i JOIN tasks t ON t.id = i.task_id
+                   WHERE i.id = ?""",
+                (attempt["item_id"],),
             ).fetchone()
             connection.execute(
                 """UPDATE attempts SET status = 'unknown', outcome = 'unknown', finished_at_utc = ?,
@@ -903,6 +905,15 @@ class TaskRepository:
                 "UPDATE tasks SET state = 'blocked', updated_at_utc = ? WHERE id = ?",
                 (_iso(now), item["task_id"]),
             )
+            if item["state"] != TaskState.BLOCKED.value:
+                self._event(
+                    connection,
+                    item["task_id"],
+                    "task_state_changed",
+                    actor,
+                    {"from": item["state"], "to": TaskState.BLOCKED.value, "reason": reason},
+                    at_utc=now,
+                )
             self._event(
                 connection,
                 item["task_id"],
@@ -1429,10 +1440,12 @@ class TaskRepository:
     def recover_inflight(self, *, at_utc: datetime | None = None) -> tuple[str, ...]:
         now = at_utc or _utc_now()
         recovered: list[str] = []
+        blocked: set[str] = set()
         with self._transaction() as connection:
             rows = connection.execute(
-                """SELECT a.id AS attempt_id, a.item_id, i.task_id FROM attempts a
-                   JOIN task_items i ON i.id = a.item_id
+                """SELECT a.id AS attempt_id, a.item_id, i.task_id, t.state AS task_state
+                   FROM attempts a JOIN task_items i ON i.id = a.item_id
+                   JOIN tasks t ON t.id = i.task_id
                    WHERE a.status = 'in_flight' ORDER BY a.started_at_utc"""
             ).fetchall()
             for row in rows:
@@ -1454,6 +1467,20 @@ class TaskRepository:
                     "UPDATE tasks SET state = 'blocked', updated_at_utc = ? WHERE id = ?",
                     (_iso(now), row["task_id"]),
                 )
+                if row["task_state"] != TaskState.BLOCKED.value and row["task_id"] not in blocked:
+                    self._event(
+                        connection,
+                        row["task_id"],
+                        "task_state_changed",
+                        "startup-recovery",
+                        {
+                            "from": row["task_state"],
+                            "to": TaskState.BLOCKED.value,
+                            "reason": "process restarted with an in-flight attempt",
+                        },
+                        at_utc=now,
+                    )
+                blocked.add(row["task_id"])
                 self._event(
                     connection,
                     row["task_id"],

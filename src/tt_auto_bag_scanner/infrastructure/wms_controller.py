@@ -290,7 +290,7 @@ class WmsController:
         # From this call onward, any error is ambiguous. Never send a second Enter.
         try:
             self.adapter.press_key("ENTER")
-            after = self._observe_until_result()
+            after = self._observe_until_result(before)
         except Exception:
             evidence = self._evidence(None, session, error="submission result could not be read")
             return ScanResult(
@@ -396,9 +396,13 @@ class WmsController:
         attempt_id: str,
         observation: PageObservation,
     ) -> ScanResult:
-        if observation.state is PageState.DUPLICATE_DIALOG:
+        if (
+            observation.state is PageState.DUPLICATE_DIALOG
+            and observation.logid
+            and observation.dialog_text == _DUPLICATE_ERROR
+        ):
             self._blocked = True
-            self._pending_duplicate = (attempt_id, item.tracking, observation.logid or "")
+            self._pending_duplicate = (attempt_id, item.tracking, observation.logid)
             self._duplicate_recovery_attempted = False
             evidence = ScanEvidence(
                 observed_at_utc=datetime.now(UTC),
@@ -430,6 +434,8 @@ class WmsController:
             observation.state is PageState.SCAN_RESULT
             and explicit_rejection
             and observation.logid
+            and observation.latest_tracking_records
+            and observation.latest_tracking_records[0] == item.tracking
             and actual_container == session.container_no
             and actual_sort == session.sort_code
         ):
@@ -470,6 +476,7 @@ class WmsController:
             )
         self._blocked = True
         self._session = None
+        self._session_generation = None
         return ScanResult(
             attempt_id=attempt_id,
             item_id=item.id,
@@ -570,10 +577,24 @@ class WmsController:
                 sleep(self.poll_interval_seconds)
         return observation
 
-    def _observe_until_result(self) -> PageObservation:
+    @staticmethod
+    def _result_signature(observation: PageObservation) -> tuple:
+        return (
+            observation.state,
+            tuple(observation.latest_tracking_records),
+            observation.logid,
+            observation.dialog_text,
+            observation.visible_labels.get("扫描状态"),
+        )
+
+    def _observe_until_result(self, before: PageObservation) -> PageObservation:
+        before_signature = self._result_signature(before)
         for attempt in range(self.poll_attempts):
             observation = self.observe()
-            if observation.state is not PageState.BAG_READY:
+            if (
+                observation.state is not PageState.BAG_READY
+                and self._result_signature(observation) != before_signature
+            ):
                 return observation
             if attempt + 1 < self.poll_attempts and self.poll_interval_seconds:
                 sleep(self.poll_interval_seconds)
