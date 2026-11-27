@@ -319,3 +319,27 @@ def test_report_timezone_defaults_to_new_york_without_saved_choice(app: QApplica
 
     window.apply_import_defaults({"report_timezone": "UTC"})
     assert window.timezone_combo.currentData() == "UTC"
+
+
+def test_pending_carrier_row_prefills_editor_and_waits_for_container(app: QApplication) -> None:
+    window = MainWindow()
+    window.set_carrier_rows(
+        [
+            {
+                "carrier_key": "Carrier A",
+                "display_name": "Carrier A",
+                "aliases": (),
+                "sort_code": "SORT-A1",
+                "container_no": "",
+                "enabled": False,
+                "pending": True,
+            }
+        ]
+    )
+
+    assert window.carrier_table.item(0, 5).text() == "待填大包号"
+    window.carrier_table.selectRow(0)
+    assert window.carrier_key_edit.text() == "Carrier A"
+    assert window.sort_code_edit.text() == "SORT-A1"
+    assert window.container_edit.text() == ""
+    assert window.carrier_enabled_check.isChecked()

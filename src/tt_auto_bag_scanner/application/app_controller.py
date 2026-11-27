@@ -6,7 +6,7 @@ import json
 import math
 import os
 import shutil
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,7 +36,10 @@ from tt_auto_bag_scanner.domain.models import (
     VerifiedSession,
 )
 from tt_auto_bag_scanner.infrastructure.adb_adapter import AdbDeviceAdapter
-from tt_auto_bag_scanner.infrastructure.carrier_config import CarrierConfigService
+from tt_auto_bag_scanner.infrastructure.carrier_config import (
+    CarrierConfigService,
+    pending_carrier_pairs,
+)
 from tt_auto_bag_scanner.infrastructure.device_manager import DeviceManager
 from tt_auto_bag_scanner.infrastructure.excel_parser import ExcelParser, WorkbookValidationError
 from tt_auto_bag_scanner.infrastructure.exporter import ReportExporter
@@ -781,6 +784,9 @@ class AppController(QObject):
         actor: str,
     ) -> None:
         preview: ImportPreview = result  # type: ignore[assignment]
+        if repository is self.repository and preview.unconfigured_carriers:
+            pending_count = self._remember_pending_carriers(preview.unconfigured_carriers)
+            self._set_status(f"{pending_count} 个承运商待填大包号")
         if repository.has_import_hash(preview.summary.source_hash):
             answer = QMessageBox.question(
                 self.window,
@@ -1041,8 +1047,30 @@ class AppController(QObject):
         self._set_status("承运商配置已保存")
         self._refresh_gates()
 
+    def _pending_carriers(self) -> tuple[tuple[str, str], ...]:
+        saved = self.settings.get("pending_carriers")
+        pairs = (
+            tuple(
+                (str(pair[0]), str(pair[1]))
+                for pair in saved
+                if isinstance(pair, (list, tuple)) and len(pair) == 2
+            )
+            if isinstance(saved, list)
+            else ()
+        )
+        return pending_carrier_pairs(pairs, (), self.repository.list_carrier_configs())
+
+    def _remember_pending_carriers(self, report_pairs: Iterable[tuple[str, str]]) -> int:
+        pending = pending_carrier_pairs(
+            self._pending_carriers(), report_pairs, self.repository.list_carrier_configs()
+        )
+        self.settings["pending_carriers"] = [list(pair) for pair in pending]
+        self._write_settings()
+        self.window.set_carrier_rows(self._carrier_rows())
+        return len(pending)
+
     def _carrier_rows(self) -> tuple[dict[str, object], ...]:
-        return tuple(
+        configured = tuple(
             {
                 "carrier_key": item.carrier_key,
                 "display_name": item.display_name,
@@ -1053,6 +1081,19 @@ class AppController(QObject):
             }
             for item in self.repository.list_carrier_configs()
         )
+        pending = tuple(
+            {
+                "carrier_key": carrier,
+                "display_name": carrier,
+                "aliases": (),
+                "sort_code": sort_code,
+                "container_no": "",
+                "enabled": False,
+                "pending": True,
+            }
+            for carrier, sort_code in self._pending_carriers()
+        )
+        return configured + pending
 
     def _verify_container(self, carrier_key: str) -> None:
         if self._reject_pending_device_job("核验或切换容器"):

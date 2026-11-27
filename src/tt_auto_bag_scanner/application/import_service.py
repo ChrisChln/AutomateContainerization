@@ -20,6 +20,7 @@ from tt_auto_bag_scanner.domain.models import (
 from tt_auto_bag_scanner.infrastructure.carrier_config import (
     CarrierConfigError,
     CarrierConfigService,
+    pending_carrier_pairs,
 )
 from tt_auto_bag_scanner.infrastructure.excel_parser import (
     ExcelParser,
@@ -98,6 +99,8 @@ class ImportPreview:
     conflicts: tuple[ImportConflict, ...]
     issues: tuple[ImportIssue, ...]
     source_rows: tuple[SourceRow, ...]
+    # Carrier/sort pairs in the report with no configuration yet (container needed).
+    unconfigured_carriers: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "candidate_items", tuple(self.candidate_items))
@@ -519,6 +522,15 @@ class ImportService:
             conflicts=conflicts_sorted,
             issues=issues_sorted,
             source_rows=workbook.rows,
+            unconfigured_carriers=pending_carrier_pairs(
+                (),
+                (
+                    (row.carrier_value, row.reported_sort_code)
+                    for row in descriptors
+                    if row.carrier_value and row.reported_sort_code
+                ),
+                carrier_configs,
+            ),
         )
 
     @staticmethod

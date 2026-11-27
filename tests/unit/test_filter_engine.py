@@ -236,3 +236,41 @@ def test_formula_without_cache_in_optional_sort_column_is_not_queued(tmp_path):
     assert preview.candidate_items == ()
     assert preview.excluded_rows[0].reason == "formula_missing_cached_value"
     assert any(issue.field == "Sort" for issue in preview.issues)
+
+
+def test_preview_lists_unconfigured_carrier_sort_pairs_from_report(tmp_path):
+    path = tmp_path / "pairs.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Tracking", "Carrier", "Status", "Outbound At", "Sort"])
+    when = datetime(2026, 11, 26, 17, 0)
+    for row in (
+        ["SYN-1", "Carrier A", "复核完成", when, "SORT-A1"],
+        ["SYN-2", "carrier a ", "复核完成", when, "sort-a1"],
+        ["SYN-3", "Carrier B", "复核完成", when, "SORT-B1"],
+        ["SYN-4", "Synthetic Carrier", "复核完成", when, "SORT-A"],
+        ["SYN-5", "Carrier C", "复核完成", when, ""],
+    ):
+        sheet.append(row)
+    workbook.save(path)
+    mapping = ImportMapping(
+        tracking_column="Tracking",
+        carrier_column="Carrier",
+        status_column="Status",
+        outbound_at_column="Outbound At",
+        report_timezone="UTC",
+        sort_code_column="Sort",
+    )
+
+    preview = ImportService().build_preview(
+        path,
+        mapping,
+        [make_config()],
+        datetime(2026, 11, 26, 18, 0, tzinfo=UTC),
+        task_id="task-pairs",
+    )
+
+    assert preview.unconfigured_carriers == (
+        ("Carrier A", "SORT-A1"),
+        ("Carrier B", "SORT-B1"),
+    )

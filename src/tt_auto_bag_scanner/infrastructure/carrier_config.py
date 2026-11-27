@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from tt_auto_bag_scanner.domain.models import CarrierConfig
 
@@ -69,3 +69,28 @@ class CarrierConfigService:
     @staticmethod
     def _normalize(value: str) -> str:
         return " ".join(value.strip().split()).casefold()
+
+
+def pending_carrier_pairs(
+    existing_pending: Iterable[tuple[str, str]],
+    report_pairs: Iterable[tuple[str, str]],
+    configs: Sequence[CarrierConfig],
+) -> tuple[tuple[str, str], ...]:
+    """Carrier/sort pairs seen in reports that still need a container before use.
+
+    Only a full config (with container) makes a pair usable; nothing here is a config.
+    """
+    normalize = CarrierConfigService._normalize
+    configured = {
+        (normalize(name), normalize(config.sort_code))
+        for config in configs
+        for name in (config.carrier_key, config.display_name, *config.aliases)
+    }
+    pending: dict[tuple[str, str], tuple[str, str]] = {}
+    for carrier, sort_code in (*existing_pending, *report_pairs):
+        carrier, sort_code = str(carrier).strip(), str(sort_code).strip()
+        key = (normalize(carrier), normalize(sort_code))
+        if not all(key) or key in configured:
+            continue
+        pending.setdefault(key, (carrier, sort_code))
+    return tuple(sorted(pending.values(), key=lambda pair: (pair[0].casefold(), pair[1])))

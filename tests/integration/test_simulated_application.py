@@ -250,3 +250,67 @@ def test_simulated_import_to_scan_workflow_never_calls_adb(tmp_path, app: QAppli
     window.set_running(False)
     controller.close()
     window.close()
+
+
+def test_report_carriers_become_pending_rows_until_container_is_filled(
+    app: QApplication, tmp_path
+) -> None:
+    report = tmp_path / "synthetic-pending-carriers.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["tracking", "carrier", "status", "outbound_at", "sort_code"])
+    outbound_at = (datetime.now(ZoneInfo("America/New_York")) - timedelta(hours=2)).replace(
+        tzinfo=None
+    )
+    sheet.append(["TRACKING-SYN-P1", "CARRIER-SYN-P", "复核完成", outbound_at, "SORT-SYN-P"])
+    workbook.save(report)
+
+    data_dir = tmp_path / "data"
+    window = MainWindow()
+    controller = AppController(window, data_dir=data_dir, poll_interval_ms=50)
+    window.set_report_path(str(report))
+    controller._build_preview(
+        {
+            "path": str(report),
+            "sheet_name": sheet.title,
+            "header_row": 1,
+            "tracking": "tracking",
+            "carrier": "carrier",
+            "status": "status",
+            "outbound_at": "outbound_at",
+            "sort_code": "sort_code",
+            "report_timezone": "America/New_York",
+            "threshold_minutes": 30,
+            "threshold_confirmed": True,
+        }
+    )
+    deadline = time.monotonic() + 5
+    while window.carrier_table.rowCount() == 0 and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert window.carrier_table.rowCount() == 1
+    assert window.carrier_table.item(0, 0).text() == "CARRIER-SYN-P"
+    assert window.carrier_table.item(0, 3).text() == "SORT-SYN-P"
+    assert window.carrier_table.item(0, 5).text() == "待填大包号"
+    assert controller.repository.list_carrier_configs() == ()
+    settings = json.loads((data_dir / "settings.json").read_text(encoding="utf-8"))
+    assert settings["pending_carriers"] == [["CARRIER-SYN-P", "SORT-SYN-P"]]
+
+    controller._save_carrier_config(
+        {
+            "carrier_key": "CARRIER-SYN-P",
+            "display_name": "CARRIER-SYN-P",
+            "aliases": (),
+            "sort_code": "SORT-SYN-P",
+            "container_no": "CONTAINER-SYN-P",
+            "enabled": True,
+        }
+    )
+
+    assert window.carrier_table.rowCount() == 1
+    assert window.carrier_table.item(0, 4).text() == "CONTAINER-SYN-P"
+    assert window.carrier_table.item(0, 5).text() == "启用"
+
+    controller.close()
+    window.close()

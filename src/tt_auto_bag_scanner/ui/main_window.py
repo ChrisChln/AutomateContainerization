@@ -38,6 +38,8 @@ from tt_auto_bag_scanner.domain.models import DeviceInfo, DeviceMode, ItemStatus
 
 # Site-confirmed report timezone; a saved choice still takes precedence.
 DEFAULT_REPORT_TIMEZONE = "America/New_York"
+# Carrier/sort pair found in a report that still needs a container number.
+PENDING_CARRIER_STATE = "待填大包号"
 
 
 class PhysicalCheckDialog(QDialog):
@@ -1364,7 +1366,10 @@ class MainWindow(QMainWindow):
         self.carrier_aliases_edit.setText(values[2].text())
         self.sort_code_edit.setText(values[3].text())
         self.container_edit.setText(values[4].text())
-        self.carrier_enabled_check.setChecked(values[5].text() == "启用")
+        pending = values[5].text() == PENDING_CARRIER_STATE
+        self.carrier_enabled_check.setChecked(pending or values[5].text() == "启用")
+        if pending:
+            self.container_edit.setFocus()
 
     def _verify_container_mapping(self) -> None:
         self.container_verify_requested.emit(self.carrier_key_edit.text().strip())
@@ -1944,7 +1949,10 @@ class MainWindow(QMainWindow):
                 if field == "aliases":
                     value = ", ".join(value) if isinstance(value, (tuple, list)) else value
                 elif field == "enabled":
-                    value = "启用" if value else "停用"
+                    if record.get("pending"):
+                        value = PENDING_CARRIER_STATE
+                    else:
+                        value = "启用" if value else "停用"
                 self.carrier_table.setItem(row, column, QTableWidgetItem(str(value)))
 
     def set_diagnostics(self, results: Mapping[str, str]) -> None:
