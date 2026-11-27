@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -362,6 +361,7 @@ class MainWindow(QMainWindow):
         self._workspace_page = 0
         self._preview_page = 0
         self._import_busy = False
+        self._device_busy = False
         self._excluded_rows: tuple[object, ...] = ()
         self._current_preview: object | None = None
         self._build_ui()
@@ -1396,18 +1396,6 @@ class MainWindow(QMainWindow):
             }
         )
 
-    def confirm_physical_skip(self, count: int, operator: str) -> str | None:
-        """Ask the operator to authorize skipping; returns their name or None."""
-        name, accepted = QInputDialog.getText(
-            self,
-            "跳过实物核验",
-            f"{count} 项未核验，将以“授权跳过”记录并允许提交 WMS。操作员：",
-            QLineEdit.EchoMode.Normal,
-            operator,
-        )
-        name = name.strip()
-        return name if accepted and name else None
-
     def set_settings(self, settings: Mapping[str, object]) -> None:
         self.operator_id_edit.setText(str(settings.get("operator_id", "")))
         self.warehouse_id_edit.setText(str(settings.get("warehouse", "")))
@@ -1549,6 +1537,7 @@ class MainWindow(QMainWindow):
         ):
             widget.setEnabled(not running)
         self.set_import_busy(self._import_busy)
+        self.set_device_busy(self._device_busy)
         self._update_selected_item()
         self._update_workspace_selection()
         self._update_reconciliation_button()
@@ -1615,6 +1604,11 @@ class MainWindow(QMainWindow):
             return
         if 0 <= threshold_minutes <= 1440:
             self.threshold_spin.setValue(threshold_minutes)
+
+    def set_device_busy(self, busy: bool) -> None:
+        self._device_busy = busy
+        self.container_verify_button.setText("PDA 验证中…" if busy else "PDA 验证")
+        self.container_verify_button.setEnabled(not busy and not self._is_running)
 
     def set_import_busy(self, busy: bool) -> None:
         self._import_busy = busy

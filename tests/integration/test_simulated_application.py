@@ -370,18 +370,15 @@ def _task_waiting_for_physical_checks(app: QApplication, tmp_path, *, skip: bool
     return window, controller
 
 
-def test_review_without_skip_setting_still_requires_physical_checks(
-    app: QApplication, tmp_path, monkeypatch
+def test_without_skip_setting_physical_checks_still_gate_start(
+    app: QApplication, tmp_path
 ) -> None:
     window, controller = _task_waiting_for_physical_checks(app, tmp_path, skip=False)
-    asked: list[int] = []
-    monkeypatch.setattr(
-        window, "confirm_physical_skip", lambda count, operator: asked.append(count)
-    )
 
+    controller._refresh_gates()
     controller._review_task()
 
-    assert asked == []
+    assert not window._physical_checks_complete
     items = controller.repository.list_items(controller.current_task_id)
     assert {item.status for item in items} == {ItemStatus.WAIT_PHYSICAL}
     assert controller.repository.get_task(controller.current_task_id).state is TaskState.DRAFT
@@ -389,21 +386,18 @@ def test_review_without_skip_setting_still_requires_physical_checks(
     window.close()
 
 
-def test_review_with_skip_setting_records_authorized_skip_after_confirmation(
-    app: QApplication, tmp_path, monkeypatch
+def test_skip_setting_alone_allows_start_and_records_authorized_skip(
+    app: QApplication, tmp_path
 ) -> None:
     window, controller = _task_waiting_for_physical_checks(app, tmp_path, skip=True)
-    monkeypatch.setattr(window, "confirm_physical_skip", lambda count, operator: None)
+    controller.settings["operator_id"] = "operator-syn-skip"
+    controller._show_error = lambda message: pytest.fail(message)
 
-    controller._review_task()
+    controller._refresh_gates()
+    assert window._physical_checks_complete
+    assert window._task_ready
 
-    items = controller.repository.list_items(controller.current_task_id)
-    assert {item.status for item in items} == {ItemStatus.WAIT_PHYSICAL}
-
-    monkeypatch.setattr(
-        window, "confirm_physical_skip", lambda count, operator: "operator-syn-skip"
-    )
-    controller._review_task()
+    assert controller._apply_authorized_skips()
 
     items = controller.repository.list_items(controller.current_task_id)
     assert {item.status for item in items} == {ItemStatus.READY}
@@ -411,5 +405,20 @@ def test_review_with_skip_setting_records_authorized_skip_after_confirmation(
     assert {check.method.value for check in checks} == {"authorized_skip"}
     assert {check.operator for check in checks} == {"operator-syn-skip"}
     assert controller.repository.get_task(controller.current_task_id).state is TaskState.READY
+    controller.close()
+    window.close()
+
+
+def test_skip_requires_an_operator_name(app: QApplication, tmp_path) -> None:
+    window, controller = _task_waiting_for_physical_checks(app, tmp_path, skip=True)
+    controller.settings["operator_id"] = ""
+    errors: list[str] = []
+    controller._show_error = errors.append
+
+    assert not controller._apply_authorized_skips()
+    assert errors == ["跳过实物核验需要先在设置中填写操作员"]
+
+    items = controller.repository.list_items(controller.current_task_id)
+    assert {item.status for item in items} == {ItemStatus.WAIT_PHYSICAL}
     controller.close()
     window.close()

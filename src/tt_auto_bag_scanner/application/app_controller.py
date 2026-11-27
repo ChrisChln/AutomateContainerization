@@ -363,6 +363,9 @@ class AppController(QObject):
         job.succeeded.connect(self._job_succeeded)
         job.failed.connect(self._job_failed)
         job.finished.connect(self._job_finished)
+        if device_job:
+            self.window.set_device_busy(True)
+            self._set_status("PDA 操作进行中…")
         job.start()
 
     def _job_succeeded(self, result: object) -> None:
@@ -393,6 +396,8 @@ class AppController(QObject):
         job = self.sender()
         if isinstance(job, OperationJob):
             self._jobs.discard(job)
+            if job.is_device_job and not self._has_pending_device_jobs():
+                self.window.set_device_busy(False)
 
     def set_mode(self, requested: DeviceMode | str) -> None:
         mode = requested if isinstance(requested, DeviceMode) else DeviceMode(str(requested))
@@ -955,8 +960,8 @@ class AppController(QObject):
             return
         items = self.repository.list_items(self.current_task_id)
         missing = sum(item.status is ItemStatus.WAIT_PHYSICAL for item in items)
-        if missing and self.settings.get("skip_physical_check") is True:
-            if not self._record_authorized_skips(items, missing):
+        if missing and self._skip_physical_enabled():
+            if not self._apply_authorized_skips():
                 return
             items = self.repository.list_items(self.current_task_id)
             missing = sum(item.status is ItemStatus.WAIT_PHYSICAL for item in items)
@@ -980,26 +985,40 @@ class AppController(QObject):
         self.window.navigate_to("扫描工作区")
         self._refresh_visible_data()
 
-    def _record_authorized_skips(self, items: Sequence[QueueItem], missing: int) -> bool:
-        """Operator-confirmed skip; each item keeps an auditable authorized_skip record."""
-        operator = self.window.confirm_physical_skip(missing, self._actor)
-        if not operator:
-            self._set_status("已取消跳过实物核验")
+    def _skip_physical_enabled(self) -> bool:
+        return self.settings.get("skip_physical_check") is True
+
+    def _apply_authorized_skips(self) -> bool:
+        """Saved setting authorizes the skip; each item keeps an authorized_skip record."""
+        task_id = self.current_task_id
+        if not task_id:
             return False
+        operator = str(self.settings.get("operator_id", "")).strip()
+        if not operator:
+            self._show_error("跳过实物核验需要先在设置中填写操作员")
+            return False
+        items = self.repository.list_items(task_id)
+        waiting = [item for item in items if item.status is ItemStatus.WAIT_PHYSICAL]
         now = datetime.now(UTC)
         try:
-            for item in items:
-                if item.status is not ItemStatus.WAIT_PHYSICAL:
-                    continue
+            for item in waiting:
                 check = self.physical_check_service.record_authorized_skip(
                     item, operator=operator, checked_at_utc=now
                 )
                 self.repository.record_physical_check(check, actor=operator)
+            if self.repository.get_task(task_id).state is TaskState.DRAFT:
+                self.repository.transition_task(
+                    task_id,
+                    TaskState.READY,
+                    actor=operator,
+                    reason="physical check skipped by saved site setting",
+                )
         except Exception as exc:
             self._show_error(f"跳过核验未完成：{exc}")
             self._refresh_visible_data(force=True)
             return False
-        self._set_status(f"{missing} 项已授权跳过实物核验")
+        if waiting:
+            self._set_status(f"{len(waiting)} 项已授权跳过实物核验")
         return True
 
     def _prepare_simulated_session(
@@ -1332,6 +1351,8 @@ class AppController(QObject):
         if not self._verified_session_valid():
             self._show_error("PDA 会话已失效，请重新验证")
             return
+        if self._skip_physical_enabled() and not self._apply_authorized_skips():
+            return
         controller = self.wms_controller
         repository = self.repository
 
@@ -1556,9 +1577,11 @@ class AppController(QObject):
                 self._device_ready() and (mode_is_simulation or self.real_mode_authorized)
             ),
             task_ready=self._task_ready(),
-            physical_checks_complete=all(
-                item.status is not ItemStatus.WAIT_PHYSICAL for item in items
-            ) and bool(items),
+            physical_checks_complete=(
+                all(item.status is not ItemStatus.WAIT_PHYSICAL for item in items)
+                or self._skip_physical_enabled()
+            )
+            and bool(items),
             unresolved_count=self._unresolved_count(),
             mode=self.mode,
             real_mode_authorized=self.real_mode_authorized,
@@ -1576,6 +1599,8 @@ class AppController(QObject):
             task = self.repository.get_task(self.current_task_id)
         except RepositoryError:
             return False
+        if task.state is TaskState.DRAFT and self._skip_physical_enabled():
+            return True
         return task.state in {
             TaskState.READY,
             TaskState.PAUSED,
