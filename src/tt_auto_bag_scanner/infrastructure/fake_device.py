@@ -288,6 +288,7 @@ class FakeDeviceAdapter:
             self._dynamic_status = "扫描成功"
             self._dynamic_page = "scan_result"
         elif outcome is ScanOutcome.REJECTED:
+            self._dynamic_latest_tracking = tracking
             self._dynamic_status = "扫描失败"
             self._dynamic_error = "模拟拒绝：该运单不可扫描"
             self._dynamic_logid = self._next_dynamic_logid()
