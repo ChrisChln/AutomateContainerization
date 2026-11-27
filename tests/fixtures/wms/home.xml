@@ -1,0 +1,6 @@
+<hierarchy>
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="工作台" visible-to-user="true" enabled="true" bounds="[0,0][100,40]" resource-id="home_title" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="仓库" visible-to-user="true" enabled="true" bounds="[0,50][80,90]" resource-id="warehouse_label" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="SYN-WAREHOUSE" visible-to-user="true" enabled="true" bounds="[90,50][300,90]" resource-id="warehouse_value" />
+  <node package="com.ss.android.pda" class="android.widget.Button" text="组大包" visible-to-user="true" enabled="true" clickable="true" bounds="[10,100][210,160]" resource-id="group_bag_button" />
+</hierarchy>

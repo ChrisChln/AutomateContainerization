@@ -1,0 +1,4 @@
+<hierarchy>
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="登录" visible-to-user="true" enabled="true" bounds="[0,0][100,40]" resource-id="login_title" />
+  <node package="com.ss.android.pda" class="android.widget.EditText" text="" focused="false" visible-to-user="true" enabled="true" bounds="[0,50][300,100]" resource-id="login_user" />
+</hierarchy>

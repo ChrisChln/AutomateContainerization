@@ -1,0 +1,588 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from tt_auto_bag_scanner.domain.models import (
+    CarrierConfig,
+    DeviceMode,
+    ItemStatus,
+    PhysicalCheck,
+    PhysicalCheckMethod,
+    QueueItem,
+    ScanOutcome,
+    VerifiedSession,
+)
+from tt_auto_bag_scanner.infrastructure.adb_adapter import AdbDeviceAdapter
+from tt_auto_bag_scanner.infrastructure.exception_handler import UnknownPageError
+from tt_auto_bag_scanner.infrastructure.fake_device import FakeDeviceAdapter
+from tt_auto_bag_scanner.infrastructure.wms_controller import (
+    SubmissionBlocked,
+    WmsController,
+)
+
+FIXTURES = Path(__file__).parents[1] / "fixtures" / "wms"
+NOW = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
+
+
+def read_fixture(name: str) -> str:
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+def test_controller_mode_reflects_simulated_or_real_adapter() -> None:
+    simulated = WmsController(FakeDeviceAdapter(), warehouse="SYN-WAREHOUSE")
+    real = WmsController(AdbDeviceAdapter(), warehouse="SYN-WAREHOUSE")
+
+    assert simulated.device_mode is DeviceMode.SIMULATED
+    assert real.device_mode is DeviceMode.REAL
+
+
+def make_config() -> CarrierConfig:
+    return CarrierConfig(
+        carrier_key="SYNTHETIC_CARRIER",
+        display_name="Synthetic carrier",
+        aliases=(),
+        sort_code="SYN_SORT_01",
+        container_no="SYN_CONTAINER_01",
+        enabled=True,
+        version=1,
+        updated_at_utc=NOW,
+    )
+
+
+def make_item(status: ItemStatus = ItemStatus.READY) -> QueueItem:
+    return QueueItem(
+        id="item-syn-1",
+        task_id="task-syn-1",
+        tracking="SYN_TRACK_NEW",
+        carrier_key="SYNTHETIC_CARRIER",
+        sort_code="SYN_SORT_01",
+        container_no="SYN_CONTAINER_01",
+        outbound_at_utc=NOW,
+        source_row_numbers=(2,),
+        status=status,
+    )
+
+
+def make_check(item: QueueItem, *, container_no: str | None = None) -> PhysicalCheck:
+    return PhysicalCheck(
+        id="check-syn-1",
+        item_id=item.id,
+        tracking=item.tracking,
+        container_no=container_no or item.container_no,
+        operator="synthetic-operator",
+        checked_at_utc=NOW,
+        method=PhysicalCheckMethod.MANUAL_CONFIRMATION,
+        evidence_ref="synthetic-evidence",
+    )
+
+
+def make_controller(*snapshots_after_enter: str):
+    adapter = FakeDeviceAdapter(
+        initial_xml=read_fixture("single_empty.xml"),
+        devices=(),
+        snapshots_after_enter=snapshots_after_enter,
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+    session = controller.open_bag(make_config())
+    return adapter, controller, session
+
+
+def test_open_bag_verifies_actual_container_sort_and_session() -> None:
+    adapter = FakeDeviceAdapter(
+        initial_xml=read_fixture("single_empty.xml"),
+        devices=(),
+        snapshots_after_enter=(read_fixture("bag_ready.xml"),),
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    session = controller.open_bag(make_config())
+
+    assert session.container_no == "SYN_CONTAINER_01"
+    assert session.sort_code == "SYN_SORT_01"
+    assert session.valid
+    assert [action[0] for action in adapter.actions].count("press_key") == 1
+    assert adapter.adb_write_call_count == 0
+
+
+def test_open_bag_navigates_home_to_container_menu_to_single_sort() -> None:
+    adapter = FakeDeviceAdapter(
+        initial_xml=read_fixture("home.xml"),
+        snapshots_after_tap=(
+            read_fixture("container_menu.xml"),
+            read_fixture("single_empty.xml"),
+        ),
+        snapshots_after_enter=(read_fixture("bag_ready.xml"),),
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    session = controller.open_bag(make_config())
+
+    taps = [action for action in adapter.actions if action[0] == "tap"]
+    assert taps[:2] == [("tap", 110, 130), ("tap", 100, 125)]
+    assert session.container_no == "SYN_CONTAINER_01"
+    assert adapter.entered_text == ("SYN_CONTAINER_01",)
+
+
+def test_open_bag_accepts_exact_management_label_from_home() -> None:
+    home = read_fixture("home.xml").replace("组大包", "大包管理")
+    adapter = FakeDeviceAdapter(
+        initial_xml=home,
+        snapshots_after_tap=(
+            read_fixture("container_menu.xml"),
+            read_fixture("single_empty.xml"),
+        ),
+        snapshots_after_enter=(read_fixture("bag_ready.xml"),),
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    controller.open_bag(make_config())
+
+    taps = [action for action in adapter.actions if action[0] == "tap"]
+    assert taps[:2] == [("tap", 110, 130), ("tap", 100, 125)]
+
+
+def test_navigation_fails_without_one_visible_exact_home_target() -> None:
+    duplicate_target = read_fixture("home.xml").replace(
+        "</hierarchy>",
+        '<node package="com.ss.android.pda" class="android.widget.Button" '
+        'text="组大包" visible-to-user="true" enabled="true" '
+        'bounds="[220,100][420,160]" resource-id="second_group_bag_button" /></hierarchy>',
+    )
+    adapter = FakeDeviceAdapter(initial_xml=duplicate_target)
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    with pytest.raises(UnknownPageError, match="target is missing or ambiguous"):
+        controller.open_bag(make_config())
+    assert not any(action[0] in {"tap", "enter_text", "press_key"} for action in adapter.actions)
+
+
+def test_container_menu_without_single_sort_never_taps_mixed_sort() -> None:
+    menu = read_fixture("container_menu.xml").replace(
+        'text="单排序" visible-to-user="true"',
+        'text="单排序" visible-to-user="false"',
+    )
+    adapter = FakeDeviceAdapter(initial_xml=menu)
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    with pytest.raises(UnknownPageError, match="target is missing or ambiguous"):
+        controller.open_bag(make_config())
+    assert not any(action[0] in {"tap", "enter_text", "press_key"} for action in adapter.actions)
+
+
+def test_open_bag_fails_closed_on_unknown_page() -> None:
+    adapter = FakeDeviceAdapter(initial_xml=read_fixture("unknown.xml"))
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    with pytest.raises(UnknownPageError):
+        controller.open_bag(make_config())
+    assert not any(action[0] in {"tap", "enter_text", "press_key"} for action in adapter.actions)
+
+
+def test_login_or_wrong_warehouse_never_navigates() -> None:
+    login_adapter = FakeDeviceAdapter(initial_xml=read_fixture("login.xml"))
+    login_controller = WmsController(login_adapter, warehouse="SYN-WAREHOUSE")
+    with pytest.raises(UnknownPageError):
+        login_controller.open_bag(make_config())
+    assert not any(
+        action[0] in {"tap", "enter_text", "press_key"}
+        for action in login_adapter.actions
+    )
+
+    wrong_warehouse = read_fixture("home.xml").replace("SYN-WAREHOUSE", "OTHER-WAREHOUSE")
+    wrong_adapter = FakeDeviceAdapter(initial_xml=wrong_warehouse)
+    wrong_controller = WmsController(wrong_adapter, warehouse="SYN-WAREHOUSE")
+    with pytest.raises(SubmissionBlocked, match="warehouse"):
+        wrong_controller.open_bag(make_config())
+    assert not any(
+        action[0] in {"tap", "enter_text", "press_key"}
+        for action in wrong_adapter.actions
+    )
+
+
+def test_verify_current_or_open_bag_is_read_only_on_matching_open_container() -> None:
+    adapter = FakeDeviceAdapter(initial_xml=read_fixture("bag_ready.xml"))
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    session = controller.verify_current_or_open_bag(make_config())
+
+    assert session.container_no == "SYN_CONTAINER_01"
+    assert session.sort_code == "SYN_SORT_01"
+    assert not any(action[0] in {"tap", "enter_text", "press_key"} for action in adapter.actions)
+    assert adapter.entered_text == ()
+
+
+def test_verify_current_or_open_bag_navigates_safely_from_home() -> None:
+    adapter = FakeDeviceAdapter(
+        initial_xml=read_fixture("home.xml"),
+        snapshots_after_tap=(
+            read_fixture("container_menu.xml"),
+            read_fixture("single_empty.xml"),
+        ),
+        snapshots_after_enter=(read_fixture("bag_ready.xml"),),
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    session = controller.verify_current_or_open_bag(make_config())
+
+    assert session.container_no == "SYN_CONTAINER_01"
+    assert len([action for action in adapter.actions if action[0] == "tap"]) == 3
+    assert adapter.entered_text == ("SYN_CONTAINER_01",)
+
+
+def test_verify_current_or_open_bag_rejects_other_container_without_actions() -> None:
+    adapter = FakeDeviceAdapter(initial_xml=read_fixture("bag_ready.xml"))
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+    different_config = CarrierConfig(
+        carrier_key="SYNTHETIC_CARRIER_2",
+        display_name="Synthetic carrier 2",
+        aliases=(),
+        sort_code="SYN_SORT_02",
+        container_no="SYN_CONTAINER_02",
+        enabled=True,
+        version=1,
+        updated_at_utc=NOW,
+    )
+
+    with pytest.raises(SubmissionBlocked, match="container"):
+        controller.verify_current_or_open_bag(different_config)
+    assert not any(action[0] in {"tap", "enter_text", "press_key"} for action in adapter.actions)
+
+
+def test_submit_requires_physical_check_and_matching_session() -> None:
+    adapter, controller, session = make_controller(read_fixture("bag_ready.xml"))
+    item = make_item()
+
+    with pytest.raises(SubmissionBlocked, match="physical"):
+        controller.submit_once(item, session, physical_check=None, attempt_id="attempt-syn-1")
+    with pytest.raises(SubmissionBlocked, match="container"):
+        wrong_container_session = VerifiedSession(
+            serial=session.serial,
+            warehouse=session.warehouse,
+            container_no="SYN_OTHER",
+            sort_code=session.sort_code,
+            session_id=session.session_id,
+            verified_at_utc=session.verified_at_utc,
+        )
+        controller.submit_once(
+            item,
+            wrong_container_session,
+            physical_check=make_check(item),
+            attempt_id="attempt-syn-1",
+        )
+
+    assert [action[0] for action in adapter.actions].count("press_key") == 1
+
+
+def test_new_result_requires_latest_record_and_exact_container_and_sort() -> None:
+    adapter, controller, session = make_controller(
+        read_fixture("bag_ready.xml"), read_fixture("scan_success.xml")
+    )
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-syn-1"
+    )
+
+    assert result.outcome is ScanOutcome.SUCCESS
+    assert result.attempt_id == "attempt-syn-1"
+    assert [action[0] for action in adapter.actions].count("press_key") == 2
+    assert result.evidence.latest_tracking == item.tracking
+
+
+def test_duplicate_is_separate_outcome_and_recovery_does_not_resubmit() -> None:
+    adapter, controller, session = make_controller(
+        read_fixture("bag_ready.xml"),
+        read_fixture("duplicate_dialog.xml"),
+        read_fixture("bag_ready.xml"),
+    )
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-syn-1"
+    )
+    recovery = controller.recover_duplicate(result, session)
+
+    assert result.outcome is ScanOutcome.ALREADY_IN_BAG
+    assert result.evidence.logid == "SYN-LOG-01"
+    assert recovery.recovered
+    assert recovery.container_no == item.container_no
+    assert [action[0] for action in adapter.actions].count("press_key") == 3
+    with pytest.raises(SubmissionBlocked, match="not issued"):
+        controller.recover_duplicate(result, session)
+
+
+def test_failed_duplicate_recovery_cannot_be_repeated() -> None:
+    adapter, controller, session = make_controller(
+        read_fixture("bag_ready.xml"),
+        read_fixture("duplicate_dialog.xml"),
+        read_fixture("unknown.xml"),
+    )
+    item = make_item()
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-syn-1"
+    )
+
+    recovery = controller.recover_duplicate(result, session)
+
+    assert not recovery.recovered
+    assert [action[0] for action in adapter.actions].count("press_key") == 3
+    with pytest.raises(SubmissionBlocked, match="already attempted"):
+        controller.recover_duplicate(result, session)
+
+
+def test_ambiguous_result_is_unknown_and_never_retries() -> None:
+    adapter, controller, session = make_controller(
+        read_fixture("bag_ready.xml"), read_fixture("unknown.xml")
+    )
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-syn-1"
+    )
+
+    assert result.outcome is ScanOutcome.UNKNOWN
+    assert [action[0] for action in adapter.actions].count("press_key") == 2
+    with pytest.raises(SubmissionBlocked, match="blocked"):
+        controller.submit_once(
+            item, session, physical_check=make_check(item), attempt_id="attempt-syn-2"
+        )
+    assert [action[0] for action in adapter.actions].count("press_key") == 2
+
+
+def test_rejected_item_cannot_be_submitted() -> None:
+    adapter, controller, session = make_controller(read_fixture("bag_ready.xml"))
+
+    with pytest.raises(SubmissionBlocked):
+        controller.submit_once(
+            make_item(ItemStatus.WAIT_PHYSICAL),
+            session,
+            physical_check=make_check(make_item()),
+            attempt_id="attempt-syn-1",
+        )
+
+
+def test_session_token_must_be_created_by_this_controller() -> None:
+    adapter = FakeDeviceAdapter(initial_xml=read_fixture("bag_ready.xml"), devices=())
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+    item = make_item()
+
+    with pytest.raises(SubmissionBlocked, match="verified by this controller"):
+        controller.submit_once(
+            item,
+            VerifiedSession(
+                serial="simulator",
+                warehouse="SYN-WAREHOUSE",
+                container_no=item.container_no,
+                sort_code=item.sort_code,
+                session_id="forged-session",
+                verified_at_utc=NOW,
+            ),
+            physical_check=make_check(item),
+            attempt_id="attempt-syn-1",
+        )
+
+
+def test_real_wms_actions_need_authorization_and_an_authorized_device() -> None:
+    class UntrustedDevice:
+        def __init__(self) -> None:
+            self.device_info = {"model": "SYNTHETIC"}
+
+        def app_current(self):
+            return {"package": "com.ss.android.pda"}
+
+        def dump_hierarchy(self, compressed=False):
+            return read_fixture("single_empty.xml")
+
+    adapter = AdbDeviceAdapter(
+        serial="SYN-DEVICE-A",
+        uiautomator_client=UntrustedDevice(),
+    )
+    unauthorized_controller = WmsController(
+        adapter,
+        warehouse="SYN-WAREHOUSE",
+        real_submission_authorized=False,
+    )
+    with pytest.raises(SubmissionBlocked, match="explicit site authorization"):
+        unauthorized_controller.open_bag(make_config())
+
+    authorized_controller = WmsController(
+        adapter,
+        warehouse="SYN-WAREHOUSE",
+        real_submission_authorized=True,
+    )
+    with pytest.raises(SubmissionBlocked, match="connected and authorized"):
+        authorized_controller.open_bag(make_config())
+
+
+def test_session_is_invalidated_when_device_app_generation_changes() -> None:
+    adapter, controller, session = make_controller(read_fixture("bag_ready.xml"))
+    adapter.launch_app("com.ss.android.pda")
+
+    with pytest.raises(SubmissionBlocked, match="session changed"):
+        controller.submit_once(
+            make_item(),
+            session,
+            physical_check=make_check(make_item()),
+            attempt_id="attempt-syn-1",
+        )
+
+
+def test_switch_bag_checks_back_navigation_without_closing_container() -> None:
+    adapter = FakeDeviceAdapter(
+        initial_xml=read_fixture("single_empty.xml"),
+        snapshots_after_enter=(
+            read_fixture("bag_ready.xml"),
+            read_fixture("bag_ready_2.xml"),
+        ),
+        snapshots_after_back=(
+            read_fixture("bag_ready.xml"),
+            read_fixture("single_empty.xml"),
+        ),
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+    controller.open_bag(make_config())
+    next_config = CarrierConfig(
+        carrier_key="SYNTHETIC_CARRIER_2",
+        display_name="Synthetic carrier 2",
+        aliases=(),
+        sort_code="SYN_SORT_02",
+        container_no="SYN_CONTAINER_02",
+        enabled=True,
+        version=1,
+        updated_at_utc=NOW,
+    )
+
+    session = controller.switch_bag(next_config, unresolved_submissions=0)
+
+    assert session.container_no == "SYN_CONTAINER_02"
+    assert session.sort_code == "SYN_SORT_02"
+    assert [action for action in adapter.actions if action[:1] == ("press_key",)] == [
+        ("press_key", "ENTER"),
+        ("press_key", "BACK"),
+        ("press_key", "BACK"),
+        ("press_key", "ENTER"),
+    ]
+
+
+def test_switch_bag_is_blocked_when_attempt_is_unresolved() -> None:
+    adapter, controller, _ = make_controller(read_fixture("bag_ready.xml"))
+    with pytest.raises(SubmissionBlocked, match="unresolved"):
+        controller.switch_bag(make_config(), unresolved_submissions=1)
+    assert [action[0] for action in adapter.actions].count("press_key") == 1
+
+
+def make_dynamic_controller(*, outcome_map=None, sort_code="SYN_SORT_01"):
+    dynamic_config = CarrierConfig(
+        carrier_key="SYNTHETIC_CARRIER",
+        display_name="Synthetic carrier",
+        aliases=(),
+        sort_code=sort_code,
+        container_no="SYN_CONTAINER_01",
+        enabled=True,
+        version=1,
+        updated_at_utc=NOW,
+    )
+    adapter = FakeDeviceAdapter(
+        warehouse="SYN-WAREHOUSE",
+        carrier_configs=(dynamic_config,),
+        outcome_map=outcome_map,
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+    return adapter, controller, dynamic_config
+
+
+def test_dynamic_simulator_runs_default_success_with_carrier_mapping() -> None:
+    adapter, controller, config = make_dynamic_controller()
+    session = controller.open_bag(config)
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-dynamic-1"
+    )
+
+    assert result.outcome is ScanOutcome.SUCCESS
+    assert result.evidence.latest_tracking == item.tracking
+    assert result.evidence.container_no == config.container_no
+    assert result.evidence.sort_code == config.sort_code
+    assert adapter.adb_write_call_count == 0
+
+
+def test_dynamic_simulator_recovers_duplicate_deterministically() -> None:
+    adapter, controller, config = make_dynamic_controller(
+        outcome_map={"SYN_TRACK_NEW": "ALREADY_IN_BAG"}
+    )
+    session = controller.open_bag(config)
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-dynamic-2"
+    )
+    recovery = controller.recover_duplicate(result, session)
+
+    assert result.outcome is ScanOutcome.ALREADY_IN_BAG
+    assert result.evidence.logid
+    assert recovery.recovered
+    assert recovery.container_no == config.container_no
+    assert adapter.adb_write_call_count == 0
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [("REJECTED", ScanOutcome.REJECTED), ("UNKNOWN", ScanOutcome.UNKNOWN)],
+)
+def test_dynamic_simulator_supports_rejected_and_unknown_paths(outcome, expected) -> None:
+    adapter, controller, config = make_dynamic_controller(
+        outcome_map={"SYN_TRACK_NEW": outcome}
+    )
+    session = controller.open_bag(config)
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id=f"attempt-{outcome.lower()}"
+    )
+
+    assert result.outcome is expected
+    assert result.attempt_id == f"attempt-{outcome.lower()}"
+    assert adapter.adb_write_call_count == 0
+
+
+def test_dynamic_simulator_reflects_actual_container_sort_mapping() -> None:
+    adapter = FakeDeviceAdapter(
+        warehouse="SYN-WAREHOUSE",
+        container_sort_map={"SYN_CONTAINER_01": "SYN_SORT_ACTUAL"},
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    with pytest.raises(SubmissionBlocked, match="does not match configuration"):
+        controller.open_bag(make_config())
+    assert adapter.adb_write_call_count == 0
+
+
+def test_dynamic_simulator_switches_between_configured_containers() -> None:
+    first = make_config()
+    second = CarrierConfig(
+        carrier_key="SYNTHETIC_CARRIER_2",
+        display_name="Synthetic carrier 2",
+        aliases=(),
+        sort_code="SYN_SORT_02",
+        container_no="SYN_CONTAINER_02",
+        enabled=True,
+        version=1,
+        updated_at_utc=NOW,
+    )
+    adapter = FakeDeviceAdapter(
+        warehouse="SYN-WAREHOUSE",
+        carrier_configs=(first, second),
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+    controller.open_bag(first)
+
+    session = controller.switch_bag(second, unresolved_submissions=0)
+
+    assert session.container_no == second.container_no
+    assert session.sort_code == second.sort_code
+    assert adapter.adb_write_call_count == 0
+

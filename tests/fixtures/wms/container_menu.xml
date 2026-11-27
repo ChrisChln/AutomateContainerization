@@ -1,0 +1,7 @@
+<hierarchy>
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="大包管理" visible-to-user="true" enabled="true" bounds="[0,0][200,40]" resource-id="container_menu_title" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="仓库" visible-to-user="true" enabled="true" bounds="[0,50][80,90]" resource-id="warehouse_label" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="SYN-WAREHOUSE" visible-to-user="true" enabled="true" bounds="[90,50][300,90]" resource-id="warehouse_value" />
+  <node package="com.ss.android.pda" class="android.widget.Button" text="单排序" visible-to-user="true" enabled="true" clickable="true" bounds="[20,100][180,150]" resource-id="single_sort_button" />
+  <node package="com.ss.android.pda" class="android.widget.Button" text="混合排序" visible-to-user="true" enabled="true" clickable="true" bounds="[220,100][380,150]" resource-id="mixed_sort_button" />
+</hierarchy>

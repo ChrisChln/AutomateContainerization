@@ -1,0 +1,13 @@
+<hierarchy>
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="单件扫描" visible-to-user="true" enabled="true" bounds="[0,0][100,40]" resource-id="page_title" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="仓库" visible-to-user="true" enabled="true" bounds="[0,0][80,40]" resource-id="warehouse_label" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="SYN-WAREHOUSE" visible-to-user="true" enabled="true" bounds="[90,0][300,40]" resource-id="warehouse_value" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="大包号" visible-to-user="true" enabled="true" bounds="[0,50][80,90]" resource-id="bag_label" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="SYN_CONTAINER_01" visible-to-user="true" enabled="true" bounds="[90,50][300,90]" resource-id="bag_value" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="排序码" visible-to-user="true" enabled="true" bounds="[0,100][80,140]" resource-id="sort_label" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="SYN_SORT_01" visible-to-user="true" enabled="true" bounds="[90,100][300,140]" resource-id="sort_value" />
+  <node package="com.ss.android.pda" class="android.widget.EditText" text="" focused="true" visible-to-user="true" enabled="true" bounds="[20,180][400,240]" resource-id="input_box" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="最近扫描" visible-to-user="true" enabled="true" bounds="[0,260][120,300]" resource-id="recent_scan_header" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="SYN_TRACK_NEW" visible-to-user="true" enabled="true" bounds="[0,310][300,350]" resource-id="recent_scan_item" />
+  <node package="com.ss.android.pda" class="android.widget.TextView" text="扫描成功" visible-to-user="true" enabled="true" bounds="[0,360][150,400]" resource-id="success_status" />
+</hierarchy>
