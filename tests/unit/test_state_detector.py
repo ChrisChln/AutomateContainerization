@@ -135,3 +135,19 @@ def test_multiple_enabled_scan_fields_are_not_treated_as_safe() -> None:
     )
 
     assert observation.state is PageState.UNKNOWN
+
+
+def test_login_word_inside_other_text_is_not_a_login_page() -> None:
+    xml = (FIXTURES / "home.xml").read_text(encoding="utf-8").replace(
+        "</hierarchy>",
+        '  <node package="com.ss.android.pda" class="android.widget.TextView" '
+        'text="登录人：synthetic-operator" visible-to-user="true" enabled="true" '
+        'bounds="[0,170][300,210]" resource-id="operator_text" />\n</hierarchy>',
+    )
+    snapshot = XmlSnapshot(
+        xml=xml, captured_at_utc=datetime.now(UTC), package_name="com.ss.android.pda"
+    )
+
+    observation = StateDetector(target_package="com.ss.android.pda").detect(snapshot)
+
+    assert observation.state is PageState.HOME

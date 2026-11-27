@@ -285,7 +285,7 @@ class AppController(QObject):
         warehouse: str,
         real_submission_authorized: bool = False,
     ) -> WmsController:
-        timeout = float(self.settings.get("response_timeout_seconds", 10))
+        timeout = float(self.settings.get("response_timeout_seconds", 15))
         interval = 0.2
         return WmsController(
             adapter,
@@ -293,6 +293,7 @@ class AppController(QObject):
             real_submission_authorized=real_submission_authorized,
             poll_attempts=max(1, math.ceil(timeout / interval)),
             poll_interval_seconds=interval,
+            timeout_seconds=timeout,
         )
 
     def _connect_window(self) -> None:

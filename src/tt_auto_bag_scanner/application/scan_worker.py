@@ -79,8 +79,7 @@ class ScanWorker(threading.Thread):
             }:
                 continue
             if item.status is ItemStatus.WAIT_PHYSICAL:
-                self._pause_at_boundary("items still require physical checks")
-                return
+                continue
             if item.status is not ItemStatus.READY:
                 self._block_task("unsafe item state", f"item {item.id} is {item.status.value}")
                 return

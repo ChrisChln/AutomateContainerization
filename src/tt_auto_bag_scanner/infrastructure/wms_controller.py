@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from time import sleep
+from time import monotonic, sleep
 from uuid import uuid4
 
 from tt_auto_bag_scanner.domain.device import DeviceAdapter
@@ -46,6 +46,7 @@ class WmsController:
         real_submission_authorized: bool = False,
         poll_attempts: int = 30,
         poll_interval_seconds: float = 0.2,
+        timeout_seconds: float | None = None,
     ) -> None:
         if not warehouse.strip():
             raise ValueError("warehouse is required")
@@ -57,6 +58,9 @@ class WmsController:
         self.real_submission_authorized = real_submission_authorized
         self.poll_attempts = poll_attempts
         self.poll_interval_seconds = poll_interval_seconds
+        if timeout_seconds is not None and timeout_seconds <= 0:
+            raise ValueError("timeout must be positive")
+        self.timeout_seconds = timeout_seconds
         self.detector = StateDetector(target_package=target_package)
         self._session: VerifiedSession | None = None
         self._session_generation: int | None = None
@@ -460,6 +464,7 @@ class WmsController:
             and actual_container == session.container_no
             and actual_sort == session.sort_code
             and explicit_success
+            and not observation.dialog_text
         ):
             return ScanResult(
                 attempt_id=attempt_id,
@@ -568,11 +573,22 @@ class WmsController:
             raise UnknownPageError("focused input must be editable and empty")
         return field
 
+    def _deadline(self) -> float | None:
+        if self.timeout_seconds is None:
+            return None
+        return monotonic() + self.timeout_seconds
+
+    def _past(self, deadline: float | None) -> bool:
+        return deadline is not None and monotonic() >= deadline
+
     def _observe_until_known(self) -> PageObservation:
+        deadline = self._deadline()
         for attempt in range(self.poll_attempts):
             observation = self.observe()
             if observation.state is not PageState.SINGLE_EMPTY:
                 return observation
+            if self._past(deadline):
+                break
             if attempt + 1 < self.poll_attempts and self.poll_interval_seconds:
                 sleep(self.poll_interval_seconds)
         return observation
@@ -589,6 +605,7 @@ class WmsController:
 
     def _observe_until_result(self, before: PageObservation) -> PageObservation:
         before_signature = self._result_signature(before)
+        deadline = self._deadline()
         for attempt in range(self.poll_attempts):
             observation = self.observe()
             if (
@@ -596,11 +613,14 @@ class WmsController:
                 and self._result_signature(observation) != before_signature
             ):
                 return observation
+            if self._past(deadline):
+                break
             if attempt + 1 < self.poll_attempts and self.poll_interval_seconds:
                 sleep(self.poll_interval_seconds)
         return observation
 
     def _observe_after_recovery(self, session: VerifiedSession) -> PageObservation:
+        deadline = self._deadline()
         observation = self.observe()
         for attempt in range(self.poll_attempts):
             if observation.state in {PageState.BAG_READY, PageState.SCAN_RESULT}:
@@ -617,6 +637,8 @@ class WmsController:
                     return observation
             elif observation.state is not PageState.DUPLICATE_DIALOG:
                 return observation
+            if self._past(deadline):
+                break
             if attempt + 1 < self.poll_attempts and self.poll_interval_seconds:
                 sleep(self.poll_interval_seconds)
             observation = self.observe()

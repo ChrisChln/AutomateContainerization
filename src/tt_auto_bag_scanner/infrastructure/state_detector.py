@@ -297,7 +297,11 @@ class StateDetector:
             return PageState.DUPLICATE_DIALOG
         ids = " ".join(resource_id.lower() for _, _, resource_id, _ in entries)
         lowered = all_text.lower()
-        if "login" in lowered or "password" in ids or "登录" in all_text:
+        if (
+            "login" in ids
+            or "password" in ids
+            or any(text in {"登录", "Login", "登录页"} for _, text, _, _ in entries)
+        ):
             return PageState.LOGIN
         has_container_menu_title = any(
             text in all_text for text in ("大包管理", "容器管理", "Container menu")

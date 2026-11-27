@@ -750,7 +750,7 @@ class MainWindow(QMainWindow):
         self.response_timeout_spin = QDoubleSpinBox()
         self.response_timeout_spin.setRange(1, 120)
         self.response_timeout_spin.setDecimals(0)
-        self.response_timeout_spin.setValue(10)
+        self.response_timeout_spin.setValue(15)
         self.response_timeout_spin.setSuffix(" 秒")
         self.minimum_age_spin = QDoubleSpinBox()
         self.minimum_age_spin.setRange(0, 1440)
@@ -1379,7 +1379,7 @@ class MainWindow(QMainWindow):
         self.operator_id_edit.setText(str(settings.get("operator_id", "")))
         self.warehouse_id_edit.setText(str(settings.get("warehouse", "")))
         self.adb_path_edit.setText(str(settings.get("adb_path", "")))
-        self.response_timeout_spin.setValue(float(settings.get("response_timeout_seconds", 10)))
+        self.response_timeout_spin.setValue(float(settings.get("response_timeout_seconds", 15)))
         self.minimum_age_spin.setValue(float(settings.get("minimum_age_minutes", 30)))
         self.confirm_minimum_age_check.setChecked(
             bool(settings.get("minimum_age_confirmed", False))

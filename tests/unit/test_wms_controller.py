@@ -677,3 +677,50 @@ def test_duplicate_requires_exact_dialog_text() -> None:
     )
 
     assert result.outcome is ScanOutcome.UNKNOWN
+
+
+def test_success_page_with_error_dialog_is_unknown() -> None:
+    with_error = read_fixture("scan_success.xml").replace(
+        "</hierarchy>",
+        '  <node package="com.ss.android.pda" class="android.widget.TextView" '
+        'text="SYN_TRACK_NEW 异常" visible-to-user="true" enabled="true" '
+        'bounds="[0,410][300,450]" resource-id="error_text" />\n</hierarchy>',
+    )
+    _, controller, session = make_controller(read_fixture("bag_ready.xml"), with_error)
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-error-dialog"
+    )
+
+    assert result.outcome is ScanOutcome.UNKNOWN
+
+
+def test_result_polling_stops_at_monotonic_deadline(monkeypatch) -> None:
+    import tt_auto_bag_scanner.infrastructure.wms_controller as module
+
+    adapter = FakeDeviceAdapter(
+        initial_xml=read_fixture("single_empty.xml"),
+        devices=(),
+        snapshots_after_enter=(read_fixture("bag_ready.xml"), read_fixture("bag_ready.xml")),
+    )
+    controller = WmsController(
+        adapter,
+        warehouse="SYN-WAREHOUSE",
+        poll_attempts=30,
+        poll_interval_seconds=0,
+        timeout_seconds=1.0,
+    )
+    session = controller.open_bag(make_config())
+    clock = iter(float(value * 100) for value in range(1000))
+    monkeypatch.setattr(module, "monotonic", lambda: next(clock), raising=False)
+    item = make_item()
+    reads_before = [a[0] for a in adapter.actions].count("snapshot_xml")
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-deadline"
+    )
+
+    reads = [a[0] for a in adapter.actions].count("snapshot_xml") - reads_before
+    assert result.outcome is ScanOutcome.UNKNOWN
+    assert reads < 10
