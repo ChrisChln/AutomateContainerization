@@ -29,6 +29,7 @@ from tt_auto_bag_scanner.infrastructure.exception_handler import (
 )
 from tt_auto_bag_scanner.infrastructure.state_detector import StateDetector
 
+_UNVERIFIED = object()
 _DUPLICATE_ERROR = "已扫描包裹已在当前大包中"
 
 
@@ -66,6 +67,9 @@ class WmsController:
         self._session_generation: int | None = None
         self._blocked = False
         self._pending_duplicate: tuple[str, str, str] | None = None
+        # The open-bag pages do not show the warehouse, so it is verified on HOME
+        # and trusted only while the device/app session generation is unchanged.
+        self._warehouse_verified_for: object = _UNVERIFIED
         self._duplicate_recovery_attempted = False
 
     @property
@@ -84,6 +88,7 @@ class WmsController:
             and self._session_generation is not None
             and current_generation != self._session_generation
         ):
+            self._warehouse_verified_for = _UNVERIFIED
             self._session = None
             self._session_generation = None
             self._blocked = True
@@ -97,6 +102,7 @@ class WmsController:
                 self._blocked = True
             raise DeviceActionError("unable to read current WMS page") from exc
         if observation.state in {PageState.UNKNOWN, PageState.LOGIN}:
+            self._warehouse_verified_for = _UNVERIFIED
             if self._session is not None:
                 self._blocked = True
             self._session = None
@@ -156,7 +162,7 @@ class WmsController:
             self._blocked = True
             raise SubmissionBlocked("WMS container or sort code does not match configuration")
         self._require_single_focused_field(after, allow_text=False)
-        if after.visible_labels.get("仓库") != self.warehouse:
+        if not self._warehouse_ok(after):
             self._session = None
             self._blocked = True
             raise SubmissionBlocked("WMS warehouse does not match configuration")
@@ -233,7 +239,7 @@ class WmsController:
             if (
                 after_back.visible_labels.get("大包号") != session.container_no
                 or after_back.visible_labels.get("排序码") != session.sort_code
-                or after_back.visible_labels.get("仓库") != self.warehouse
+                or not self._warehouse_ok(after_back)
             ):
                 self._session = None
                 self._session_generation = None
@@ -311,6 +317,7 @@ class WmsController:
         self._session = None
         self._session_generation = None
         self._blocked = True
+        self._warehouse_verified_for = _UNVERIFIED
 
     def recover_duplicate(
         self, result: ScanResult, session: VerifiedSession
@@ -370,7 +377,7 @@ class WmsController:
             after.state in {PageState.BAG_READY, PageState.SCAN_RESULT}
             and after.visible_labels.get("大包号") == session.container_no
             and after.visible_labels.get("排序码") == session.sort_code
-            and after.visible_labels.get("仓库") == session.warehouse
+            and self._warehouse_ok(after)
             and not after.dialog_text
             and len(after.focused_inputs) == 1
             and not after.focused_inputs[0].text.strip()
@@ -520,7 +527,7 @@ class WmsController:
             self._session_generation = None
             self._blocked = True
             raise SubmissionBlocked("visible sort code does not match verified session")
-        if observation.visible_labels.get("仓库") != session.warehouse:
+        if not self._warehouse_ok(observation):
             self._session = None
             self._session_generation = None
             self._blocked = True
@@ -627,7 +634,7 @@ class WmsController:
                 if (
                     observation.visible_labels.get("大包号") != session.container_no
                     or observation.visible_labels.get("排序码") != session.sort_code
-                    or observation.visible_labels.get("仓库") != session.warehouse
+                    or not self._warehouse_ok(observation)
                 ):
                     return observation
                 if (
@@ -692,9 +699,26 @@ class WmsController:
         if info.state.lower() != "device" or not info.authorized:
             raise SubmissionBlocked("real device must be connected and authorized")
 
+    def _warehouse_ok(self, observation: PageObservation) -> bool:
+        visible = observation.visible_labels.get("仓库", "")
+        if visible:
+            return visible == self.warehouse
+        return (
+            self._warehouse_verified_for is not _UNVERIFIED
+            and self._warehouse_verified_for == getattr(self.adapter, "session_generation", None)
+        )
+
     def _require_warehouse(self, observation: PageObservation) -> None:
-        if observation.visible_labels.get("仓库") != self.warehouse:
-            raise SubmissionBlocked("visible warehouse does not match configuration")
+        if observation.state is PageState.HOME:
+            if observation.visible_labels.get("仓库", "") != self.warehouse:
+                self._warehouse_verified_for = _UNVERIFIED
+                raise SubmissionBlocked("home warehouse does not match configuration")
+            self._warehouse_verified_for = getattr(self.adapter, "session_generation", None)
+            return
+        if not self._warehouse_ok(observation):
+            raise SubmissionBlocked(
+                "warehouse must match configuration or be verified on the home page first"
+            )
 
     def _tap_navigation_target(
         self,

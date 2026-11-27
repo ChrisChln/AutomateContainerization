@@ -724,3 +724,56 @@ def test_result_polling_stops_at_monotonic_deadline(monkeypatch) -> None:
     reads = [a[0] for a in adapter.actions].count("snapshot_xml") - reads_before
     assert result.outcome is ScanOutcome.UNKNOWN
     assert reads < 10
+
+
+def _without_warehouse(name: str) -> str:
+    return "\n".join(
+        line for line in read_fixture(name).splitlines() if "warehouse_" not in line
+    )
+
+
+def test_warehouse_verified_on_home_covers_pages_without_warehouse_label() -> None:
+    adapter = FakeDeviceAdapter(
+        initial_xml=read_fixture("home.xml"),
+        snapshots_after_tap=(
+            _without_warehouse("container_menu.xml"),
+            _without_warehouse("single_empty.xml"),
+        ),
+        snapshots_after_enter=(
+            _without_warehouse("bag_ready.xml"),
+            _without_warehouse("scan_success.xml"),
+        ),
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+    session = controller.open_bag(make_config())
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-home-wh"
+    )
+
+    assert result.outcome is ScanOutcome.SUCCESS
+
+
+def test_page_without_warehouse_label_requires_prior_home_verification() -> None:
+    adapter = FakeDeviceAdapter(
+        initial_xml=_without_warehouse("single_empty.xml"),
+        devices=(),
+        snapshots_after_enter=(_without_warehouse("bag_ready.xml"),),
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    with pytest.raises(SubmissionBlocked):
+        controller.open_bag(make_config())
+
+    assert adapter.entered_text == ()
+
+
+def test_home_with_other_warehouse_never_navigates() -> None:
+    adapter = FakeDeviceAdapter(initial_xml=read_fixture("home.xml"))
+    controller = WmsController(adapter, warehouse="SYN-OTHER")
+
+    with pytest.raises(SubmissionBlocked):
+        controller.open_bag(make_config())
+
+    assert [a for a in adapter.actions if a[0] == "tap"] == []
