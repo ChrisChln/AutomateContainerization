@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re as _re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -666,9 +667,11 @@ def test_rejection_for_another_tracking_is_unknown_not_rejected() -> None:
 
 
 def test_duplicate_requires_exact_dialog_text() -> None:
-    altered = read_fixture("duplicate_dialog.xml").replace(
-        'text="已扫描包裹已在当前大包中"', 'text="已扫描包裹已在当前大包中（其他大包）"'
+    original = read_fixture("duplicate_dialog.xml")
+    altered = original.replace(
+        'text="已扫描包裹已在当前大包中。', 'text="已扫描包裹已在当前大包中（其他大包）。'
     )
+    assert altered != original
     _, controller, session = make_controller(read_fixture("bag_ready.xml"), altered)
     item = make_item()
 
@@ -777,3 +780,184 @@ def test_home_with_other_warehouse_never_navigates() -> None:
         controller.open_bag(make_config())
 
     assert [a for a in adapter.actions if a[0] == "tap"] == []
+
+
+# --- 真机“单排序”页面（脱敏 XML）的离线回归 ------------------------------------------
+
+REAL_TRACKING = "TRACKING_TEST_001"
+REAL_CONTAINER = "CT0000000000001"
+REAL_SORT = "CARRIER_TEST_01"
+REAL_DIALOG_INPUT_CENTER = ((42 + 438) // 2, (597 + 670) // 2)
+
+
+def _focus_single_input(xml: str) -> str:
+    focused, count = _re.subn(
+        r'(class="android\.widget\.EditText"[^>]*?)focused="false"',
+        r'\1focused="true"',
+        xml,
+    )
+    assert count == 1
+    return focused
+
+
+def _real_config() -> CarrierConfig:
+    return CarrierConfig(
+        carrier_key="CARRIER_TEST",
+        display_name="Carrier test",
+        aliases=(),
+        sort_code=REAL_SORT,
+        container_no=REAL_CONTAINER,
+        enabled=True,
+        version=1,
+        updated_at_utc=NOW,
+    )
+
+
+def _real_item(tracking: str = REAL_TRACKING) -> QueueItem:
+    return QueueItem(
+        id="item-real-1",
+        task_id="task-real-1",
+        tracking=tracking,
+        carrier_key="CARRIER_TEST",
+        sort_code=REAL_SORT,
+        container_no=REAL_CONTAINER,
+        outbound_at_utc=NOW,
+        source_row_numbers=(2,),
+        status=ItemStatus.READY,
+    )
+
+
+def make_real_controller(*after_enter: str, before: str | None = None, extra_taps=()):
+    before_xml = before or read_fixture("real_single_sort_bag_ready.xml")
+    adapter = FakeDeviceAdapter(
+        initial_xml=read_fixture("real_wms_home.xml"),
+        devices=(),
+        snapshots_after_tap=(
+            read_fixture("real_containerization.xml"),
+            read_fixture("real_single_sort_empty.xml"),
+            read_fixture("real_single_sort_empty.xml"),
+            _focus_single_input(before_xml) if before is None else before_xml,
+            *extra_taps,
+        ),
+        snapshots_after_enter=(read_fixture("real_single_sort_bag_ready.xml"), *after_enter),
+    )
+    controller = WmsController(adapter, warehouse="WAREHOUSE_TEST", poll_interval_seconds=0)
+    session = controller.open_bag(_real_config())
+    if before is not None:
+        adapter._current_xml = before
+    return adapter, controller, session
+
+
+def _submit_real(controller, session, item=None):
+    item = item or _real_item()
+    return controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-real-1"
+    )
+
+
+def test_real_open_bag_reads_label_adjacent_container_and_sort() -> None:
+    adapter, _, session = make_real_controller()
+
+    assert session.container_no == REAL_CONTAINER
+    assert session.sort_code == REAL_SORT
+    assert adapter.entered_text == (REAL_CONTAINER,)
+
+
+def test_real_success_uses_first_latest_record_and_verified_session() -> None:
+    adapter, controller, session = make_real_controller(
+        read_fixture("real_single_sort_success.xml")
+    )
+
+    result = _submit_real(controller, session)
+
+    assert result.outcome is ScanOutcome.SUCCESS
+    assert result.evidence.latest_tracking == REAL_TRACKING
+    assert adapter.entered_text == (REAL_CONTAINER, REAL_TRACKING)
+    assert adapter.actions.count(("press_key", "ENTER")) == 2
+
+
+def test_real_success_without_tracking_in_visible_latest_records_is_unknown() -> None:
+    adapter, controller, session = make_real_controller(
+        read_fixture("real_single_sort_success_scrolled.xml")
+    )
+
+    result = _submit_real(controller, session)
+
+    assert result.outcome is ScanOutcome.UNKNOWN
+    assert adapter.actions.count(("press_key", "ENTER")) == 2
+
+
+def test_real_success_with_other_sort_code_is_unknown() -> None:
+    other_sort = read_fixture("real_single_sort_success.xml").replace(REAL_SORT, "CARRIER_TEST_02")
+    _, controller, session = make_real_controller(other_sort)
+
+    assert _submit_real(controller, session).outcome is ScanOutcome.UNKNOWN
+
+
+def test_real_success_with_visible_error_text_is_unknown() -> None:
+    with_error = read_fixture("real_single_sort_success.xml").replace(
+        "</hierarchy>",
+        '<node index="9" text="已扫描包裹已在当前大包中。; Logid=TEST_LOG_ID" resource-id="" '
+        'class="android.widget.TextView" package="com.ss.android.pda" content-desc="" '
+        'enabled="true" focused="false" visible-to-user="true" bounds="[54,525][414,624]" />'
+        "</hierarchy>",
+    )
+    _, controller, session = make_real_controller(with_error)
+
+    assert _submit_real(controller, session).outcome is ScanOutcome.UNKNOWN
+
+
+def test_real_tracking_already_first_before_submit_is_blocked() -> None:
+    success = read_fixture("real_single_sort_success.xml")
+    adapter, controller, session = make_real_controller(before=success)
+
+    with pytest.raises(SubmissionBlocked):
+        _submit_real(controller, session)
+    assert adapter.entered_text == (REAL_CONTAINER,)
+
+
+def test_real_duplicate_recovery_types_tracking_only_into_dialog_input() -> None:
+    duplicate = read_fixture("real_single_sort_duplicate.xml")
+    adapter, controller, session = make_real_controller(
+        duplicate,
+        read_fixture("real_single_sort_success.xml"),
+        extra_taps=(duplicate,),
+    )
+
+    result = _submit_real(controller, session)
+    recovery = controller.recover_duplicate(result, session)
+
+    assert result.outcome is ScanOutcome.ALREADY_IN_BAG
+    assert result.evidence.logid == "TEST_LOG_ID"
+    assert recovery.recovered
+    assert adapter.entered_text == (REAL_CONTAINER, REAL_TRACKING, REAL_TRACKING)
+    taps = [action for action in adapter.actions if action[0] == "tap"]
+    assert taps[-1] == ("tap", *REAL_DIALOG_INPUT_CENTER)
+
+
+def test_real_duplicate_for_another_tracking_is_unknown() -> None:
+    adapter, controller, session = make_real_controller(
+        read_fixture("real_single_sort_duplicate.xml")
+    )
+
+    result = _submit_real(controller, session, _real_item("TRACKING_TEST_009"))
+
+    assert result.outcome is ScanOutcome.UNKNOWN
+
+
+def test_real_duplicate_recovery_refuses_non_empty_dialog_input() -> None:
+    duplicate = read_fixture("real_single_sort_duplicate.xml")
+    filled, count = _re.subn(
+        r'text=""(\s+resource-id=""\s+class="android\.widget\.EditText"[^>]*'
+        r'bounds="\[42,597\]\[438,670\]")',
+        rf'text="{REAL_CONTAINER}"\1',
+        duplicate,
+    )
+    assert count == 1
+    adapter, controller, session = make_real_controller(duplicate)
+    result = _submit_real(controller, session)
+    adapter._current_xml = filled
+
+    with pytest.raises((UnknownPageError, SubmissionBlocked)):
+        controller.recover_duplicate(result, session)
+    assert adapter.entered_text == (REAL_CONTAINER, REAL_TRACKING)

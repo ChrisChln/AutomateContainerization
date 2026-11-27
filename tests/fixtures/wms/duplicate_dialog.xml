@@ -1,7 +1,9 @@
 <hierarchy>
   <node package="com.ss.android.pda" class="android.widget.TextView" text="单件扫描" visible-to-user="true" enabled="true" bounds="[0,0][100,40]" resource-id="page_title" />
-  <node package="com.ss.android.pda" class="android.widget.TextView" text="已扫描包裹已在当前大包中" visible-to-user="true" enabled="true" bounds="[20,100][400,160]" resource-id="duplicate_error" />
-  <node package="com.ss.android.pda" class="android.widget.TextView" text="Logid: SYN-LOG-01" visible-to-user="true" enabled="true" bounds="[20,170][400,210]" resource-id="log_id" />
-  <node package="com.ss.android.pda" class="android.widget.EditText" text="" focused="false" visible-to-user="true" enabled="false" bounds="[10,220][300,270]" resource-id="disabled_input" />
-  <node package="com.ss.android.pda" class="android.widget.EditText" text="" focused="true" visible-to-user="true" enabled="true" bounds="[20,280][400,330]" resource-id="retry_tracking" />
+  <node package="com.ss.android.pda" class="android.widget.EditText" text="SYN_TRACK_NEW" focused="false" visible-to-user="true" enabled="false" bounds="[10,220][300,270]" resource-id="disabled_input" />
+  <node package="com.ss.android.pda" class="android.view.View" text="" visible-to-user="true" enabled="true" bounds="[0,90][480,400]" resource-id="">
+    <node package="com.ss.android.pda" class="android.widget.TextView" text="提示" visible-to-user="true" enabled="true" bounds="[20,90][100,130]" resource-id="" />
+    <node package="com.ss.android.pda" class="android.widget.TextView" text="已扫描包裹已在当前大包中。; Logid=SYN-LOG-01,请重新扫描追踪号码，然后扫描正确的容器 SYN_TRACK_NEW" visible-to-user="true" enabled="true" bounds="[20,140][460,210]" resource-id="" />
+    <node package="com.ss.android.pda" class="android.widget.EditText" text="" focused="true" visible-to-user="true" enabled="true" bounds="[20,280][400,330]" resource-id="retry_tracking" />
+  </node>
 </hierarchy>

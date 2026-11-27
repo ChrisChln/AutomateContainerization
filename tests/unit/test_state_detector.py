@@ -46,9 +46,11 @@ def test_duplicate_dialog_requires_exact_verified_error_and_logid() -> None:
 
     assert duplicate.state is PageState.DUPLICATE_DIALOG
     assert duplicate.logid == "SYN-LOG-01"
-    assert duplicate.dialog_text == "已扫描包裹已在当前大包中"
-    assert len(duplicate.focused_inputs) == 1
-    assert duplicate.focused_inputs[0].resource_id == "retry_tracking"
+    assert duplicate.duplicate_in_bag
+    assert duplicate.dialog_tracking == "SYN_TRACK_NEW"
+    assert duplicate.dialog_text.startswith("已扫描包裹已在当前大包中。; Logid=SYN-LOG-01")
+    assert len(duplicate.dialog_inputs) == 1
+    assert duplicate.dialog_inputs[0].resource_id == "retry_tracking"
 
 
 def test_error_text_is_not_a_recent_scan_record() -> None:
@@ -185,3 +187,129 @@ def test_real_wms_home_reads_warehouse_and_one_group_bag_target() -> None:
     assert observation.state is PageState.HOME
     assert observation.visible_labels["仓库"] == "WAREHOUSE_TEST"
     assert target.text == "组大包"
+
+
+# --- 真机“单排序”页面（脱敏 XML） ---------------------------------------------------
+
+
+def test_real_single_sort_empty_page() -> None:
+    page = observe("real_single_sort_empty.xml")
+
+    assert page.state is PageState.SINGLE_EMPTY
+    assert page.visible_labels.get("大包号", "") == ""
+    assert page.visible_labels.get("排序码", "") == ""
+    assert len(page.input_fields) == 1
+    assert page.input_fields[0].text == ""
+    assert page.focused_inputs[0].bounds == (34, 639, 445, 712)
+
+
+def test_real_bag_ready_reads_label_adjacent_values_without_focus() -> None:
+    page = observe("real_single_sort_bag_ready.xml")
+
+    assert page.state is PageState.BAG_READY
+    assert page.visible_labels["大包号"] == "CT0000000000001"
+    assert page.visible_labels["排序码"] == "CARRIER_TEST_01"
+    assert page.visible_labels["总包裹数量"] == "17"
+    assert page.latest_tracking_records == ()
+    assert page.focused_inputs == ()
+    assert len(page.input_fields) == 1
+    assert page.input_fields[0].bounds == (34, 639, 445, 712)
+    assert not page.input_fields[0].focused
+
+
+def test_real_success_page_reads_latest_records_under_last_scanned_anchor() -> None:
+    page = observe("real_single_sort_success.xml")
+
+    assert page.state is PageState.SCAN_RESULT
+    assert page.latest_tracking_records == (
+        "TRACKING_TEST_001",
+        "TRACKING_TEST_002",
+        "TRACKING_TEST_003",
+    )
+    assert page.visible_labels["排序码"] == "CARRIER_TEST_01"
+    assert "大包号" not in page.visible_labels
+    assert page.visible_labels["扫描数量"] == "18"
+    assert page.dialog_text == ""
+    assert page.logid is None
+
+
+def test_real_scrolled_records_without_anchor_are_not_latest_records() -> None:
+    page = observe("real_single_sort_success_scrolled.xml")
+
+    assert page.latest_tracking_records == ()
+    assert page.state is PageState.BAG_READY
+    assert page.visible_labels["大包号"] == "CT0000000000001"
+
+
+def test_real_duplicate_dialog_is_recognized_from_dialog_subtree() -> None:
+    page = observe("real_single_sort_duplicate.xml")
+
+    assert page.state is PageState.DUPLICATE_DIALOG
+    assert page.duplicate_in_bag
+    assert page.logid == "TEST_LOG_ID"
+    assert page.dialog_tracking == "TRACKING_TEST_001"
+    assert len(page.input_fields) == 2
+    assert len(page.dialog_inputs) == 1
+    assert page.dialog_inputs[0].text == ""
+    assert page.dialog_inputs[0].bounds == (42, 597, 438, 670)
+
+
+def _real_duplicate_with_body(body: str):
+    xml = (FIXTURES / "real_single_sort_duplicate.xml").read_text(encoding="utf-8")
+    original = (
+        "已扫描包裹已在当前大包中。; Logid=TEST_LOG_ID,"
+        "请重新扫描追踪号码，然后扫描正确的容器 TRACKING_TEST_001"
+    )
+    assert original in xml
+    return StateDetector(target_package="com.ss.android.pda").detect(
+        XmlSnapshot(
+            xml.replace(original, body), datetime.now(UTC), package_name="com.ss.android.pda"
+        )
+    )
+
+
+def test_real_duplicate_accepts_body_without_trailing_period() -> None:
+    page = _real_duplicate_with_body(
+        "已扫描包裹已在当前大包中; Logid=TEST_LOG_ID,"
+        "请重新扫描追踪号码，然后扫描正确的容器 TRACKING_TEST_001"
+    )
+
+    assert page.state is PageState.DUPLICATE_DIALOG
+    assert page.dialog_tracking == "TRACKING_TEST_001"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # 模糊包含：前后多了文字
+        "注意：已扫描包裹已在当前大包中。; Logid=TEST_LOG_ID,"
+        "请重新扫描追踪号码，然后扫描正确的容器 TRACKING_TEST_001",
+        "已扫描包裹已在其他大包中。; Logid=TEST_LOG_ID,"
+        "请重新扫描追踪号码，然后扫描正确的容器 TRACKING_TEST_001",
+        # Logid 为空
+        "已扫描包裹已在当前大包中。; Logid=,"
+        "请重新扫描追踪号码，然后扫描正确的容器 TRACKING_TEST_001",
+        # 没有运单号
+        "已扫描包裹已在当前大包中。; Logid=TEST_LOG_ID,请重新扫描追踪号码，然后扫描正确的容器",
+    ],
+)
+def test_real_duplicate_rejects_non_exact_body(body: str) -> None:
+    page = _real_duplicate_with_body(body)
+
+    assert page.state is not PageState.DUPLICATE_DIALOG
+    assert not page.duplicate_in_bag
+
+
+def test_conflicting_logids_on_one_page_are_not_trusted() -> None:
+    xml = (FIXTURES / "real_single_sort_duplicate.xml").read_text(encoding="utf-8")
+    xml = xml.replace(
+        "已扫描包裹已在当前大包中。; Logid=TEST_LOG_ID\"",
+        "已扫描包裹已在当前大包中。; Logid=OTHER_LOG_ID\"",
+    )
+    assert "OTHER_LOG_ID" in xml
+    page = StateDetector(target_package="com.ss.android.pda").detect(
+        XmlSnapshot(xml, datetime.now(UTC), package_name="com.ss.android.pda")
+    )
+
+    assert page.logid is None
+    assert page.state is not PageState.DUPLICATE_DIALOG

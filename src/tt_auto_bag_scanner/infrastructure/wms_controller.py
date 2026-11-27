@@ -30,7 +30,6 @@ from tt_auto_bag_scanner.infrastructure.exception_handler import (
 from tt_auto_bag_scanner.infrastructure.state_detector import StateDetector
 
 _UNVERIFIED = object()
-_DUPLICATE_ERROR = "已扫描包裹已在当前大包中"
 
 
 class SubmissionBlocked(RuntimeError):
@@ -141,8 +140,9 @@ class WmsController:
         self.adapter.tap_field(field)
         focused = self.observe()
         self._require_warehouse(focused)
-        focused_field = self._unique_empty_field(focused)
-        self._require_same_field(field, focused_field)
+        if focused.state is not PageState.SINGLE_EMPTY:
+            raise UnknownPageError("expected the empty single-scan page")
+        self._require_focused_same_field(field, focused.input_fields)
         try:
             self.adapter.enter_text(config.container_no)
             self.adapter.press_key("ENTER")
@@ -161,7 +161,7 @@ class WmsController:
             self._session = None
             self._blocked = True
             raise SubmissionBlocked("WMS container or sort code does not match configuration")
-        self._require_single_focused_field(after, allow_text=False)
+        self._require_single_empty_input(after)
         if not self._warehouse_ok(after):
             self._session = None
             self._blocked = True
@@ -179,11 +179,16 @@ class WmsController:
         observation = self.observe()
         if observation.state in {PageState.BAG_READY, PageState.SCAN_RESULT}:
             self._require_warehouse(observation)
-            if observation.visible_labels.get("大包号") != config.container_no:
+            visible_bag = observation.visible_labels.get("大包号", "")
+            if visible_bag and visible_bag != config.container_no:
                 raise SubmissionBlocked("visible container does not match configuration")
+            if not visible_bag and (
+                self._session is None or self._session.container_no != config.container_no
+            ):
+                raise SubmissionBlocked("visible container is required without a verified session")
             if observation.visible_labels.get("排序码") != config.sort_code:
                 raise SubmissionBlocked("visible sort code does not match configuration")
-            self._require_single_focused_field(observation, allow_text=False)
+            self._require_single_empty_input(observation)
             self._ensure_real_device_connected()
             if self._session is not None:
                 self._validate_session_token(self._session)
@@ -222,7 +227,7 @@ class WmsController:
         self._validate_session_token(session)
         current = self.observe()
         self._require_session_page(current, session)
-        self._require_single_focused_field(current, allow_text=False)
+        self._require_single_empty_input(current)
 
         for _ in range(2):
             self.adapter.press_key("BACK")
@@ -237,7 +242,7 @@ class WmsController:
                 self._blocked = True
                 raise UnknownPageError("WMS page is unknown while leaving the current bag")
             if (
-                after_back.visible_labels.get("大包号") != session.container_no
+                not self._bag_matches(after_back, session.container_no)
                 or after_back.visible_labels.get("排序码") != session.sort_code
                 or not self._warehouse_ok(after_back)
             ):
@@ -280,11 +285,10 @@ class WmsController:
         self._require_session_page(before, session)
         if item.tracking in before.latest_tracking_records:
             raise SubmissionBlocked("tracking already appears in the current latest record")
-        field = self._require_single_focused_field(before, allow_text=False)
+        field = self._require_single_empty_input(before)
         self.adapter.tap_field(field)
         focused = self.observe()
-        focused_field = self._require_single_focused_field(focused, allow_text=False)
-        self._require_same_field(field, focused_field)
+        self._require_focused_same_field(field, focused.input_fields)
         if focused.state not in {PageState.BAG_READY, PageState.SCAN_RESULT}:
             raise SubmissionBlocked("page changed before submission")
         try:
@@ -310,7 +314,7 @@ class WmsController:
                 outcome=ScanOutcome.UNKNOWN,
                 evidence=evidence,
             )
-        return self._classify_scan_result(item, session, attempt_id, after)
+        return self._classify_scan_result(item, session, attempt_id, after, before)
 
     def invalidate_session(self) -> None:
         """Invalidate after manual takeover, app restart, or an external disconnect."""
@@ -344,18 +348,26 @@ class WmsController:
         current = self.observe()
         if current.state is not PageState.DUPLICATE_DIALOG:
             raise UnknownPageError("duplicate dialog is no longer visible")
-        if current.dialog_text != _DUPLICATE_ERROR or current.logid != result.evidence.logid:
+        if (
+            not current.duplicate_in_bag
+            or current.logid != result.evidence.logid
+            or current.dialog_tracking != result.tracking
+        ):
             raise SubmissionBlocked("duplicate evidence does not match the current dialog")
-        fields = current.focused_inputs
-        if len(fields) != 1 or not fields[0].editable or fields[0].text.strip():
-            raise UnknownPageError("recovery requires one focused empty enabled field")
-        prior_field = fields[0]
+        if result.tracking in {session.container_no, session.sort_code}:
+            raise SubmissionBlocked("recovery may only re-enter the original tracking number")
+        # Only the single empty input inside the dialog; never the outer field.
+        prior_field = self._require_single_empty_input(current, dialog_only=True)
         self.adapter.tap_field(prior_field)
         refreshed = self.observe()
-        fields = refreshed.focused_inputs
-        if refreshed.state is not PageState.DUPLICATE_DIALOG or len(fields) != 1:
+        if (
+            refreshed.state is not PageState.DUPLICATE_DIALOG
+            or refreshed.logid != result.evidence.logid
+            or refreshed.dialog_tracking != result.tracking
+        ):
             raise UnknownPageError("duplicate dialog changed before recovery")
-        self._require_same_field(prior_field, fields[0])
+        self._require_single_empty_input(refreshed, dialog_only=True)
+        self._require_focused_same_field(prior_field, refreshed.dialog_inputs)
         self._duplicate_recovery_attempted = True
         try:
             self.adapter.enter_text(result.tracking)
@@ -375,12 +387,12 @@ class WmsController:
             )
         recovered = (
             after.state in {PageState.BAG_READY, PageState.SCAN_RESULT}
-            and after.visible_labels.get("大包号") == session.container_no
+            and self._bag_matches(after, session.container_no)
             and after.visible_labels.get("排序码") == session.sort_code
             and self._warehouse_ok(after)
             and not after.dialog_text
-            and len(after.focused_inputs) == 1
-            and not after.focused_inputs[0].text.strip()
+            and len(after.input_fields) == 1
+            and not after.input_fields[0].text.strip()
         )
         if recovered:
             self._blocked = False
@@ -406,11 +418,13 @@ class WmsController:
         session: VerifiedSession,
         attempt_id: str,
         observation: PageObservation,
+        before: PageObservation,
     ) -> ScanResult:
         if (
             observation.state is PageState.DUPLICATE_DIALOG
+            and observation.duplicate_in_bag
             and observation.logid
-            and observation.dialog_text == _DUPLICATE_ERROR
+            and observation.dialog_tracking == item.tracking
         ):
             self._blocked = True
             self._pending_duplicate = (attempt_id, item.tracking, observation.logid)
@@ -433,10 +447,8 @@ class WmsController:
             )
         actual_container = observation.visible_labels.get("大包号")
         actual_sort = observation.visible_labels.get("排序码")
-        explicit_success = observation.visible_labels.get("扫描状态") in {
-            "扫描成功",
-            "Scan successful",
-        }
+        status_label = observation.visible_labels.get("扫描状态")
+        no_failure_status = status_label in {None, "扫描成功", "Scan successful"}
         explicit_rejection = observation.visible_labels.get("扫描状态") in {
             "扫描失败",
             "Scan rejected",
@@ -468,10 +480,12 @@ class WmsController:
             observation.state is PageState.SCAN_RESULT
             and observation.latest_tracking_records
             and observation.latest_tracking_records[0] == item.tracking
-            and actual_container == session.container_no
+            and before.latest_tracking_records[:1] != (item.tracking,)
+            and self._bag_matches(observation, session.container_no)
             and actual_sort == session.sort_code
-            and explicit_success
+            and no_failure_status
             and not observation.dialog_text
+            and not observation.logid
         ):
             return ScanResult(
                 attempt_id=attempt_id,
@@ -481,7 +495,9 @@ class WmsController:
                 evidence=ScanEvidence(
                     observed_at_utc=datetime.now(UTC),
                     latest_tracking=observation.latest_tracking_records[0],
-                    container_no=actual_container,
+                    # The result page may scroll the bag card away; it then comes
+                    # from this controller's still-valid verified session.
+                    container_no=actual_container or session.container_no,
                     sort_code=actual_sort,
                     redacted_xml_ref=observation.redacted_xml_ref,
                 ),
@@ -517,7 +533,7 @@ class WmsController:
             self._session_generation = None
             self._blocked = True
             raise UnknownPageError("current WMS page is not a known open bag")
-        if observation.visible_labels.get("大包号") != session.container_no:
+        if not self._bag_matches(observation, session.container_no):
             self._session = None
             self._session_generation = None
             self._blocked = True
@@ -565,20 +581,37 @@ class WmsController:
             raise UnknownPageError("focused input changed before text entry")
 
     @staticmethod
+    def _bag_matches(observation: PageObservation, container_no: str) -> bool:
+        """A visible bag must match; only a result page may omit it (session-backed)."""
+        visible = observation.visible_labels.get("大包号", "")
+        if visible:
+            return visible == container_no
+        return observation.state is PageState.SCAN_RESULT
+
+    @staticmethod
     def _unique_empty_field(observation: PageObservation):
         if observation.state is not PageState.SINGLE_EMPTY:
             raise UnknownPageError("expected the empty single-scan page")
-        return WmsController._require_single_focused_field(observation, allow_text=False)
+        return WmsController._require_single_empty_input(observation)
 
     @staticmethod
-    def _require_single_focused_field(observation: PageObservation, *, allow_text: bool):
-        fields = observation.focused_inputs
+    def _require_single_empty_input(observation: PageObservation, *, dialog_only: bool = False):
+        fields = observation.dialog_inputs if dialog_only else observation.input_fields
         if len(fields) != 1:
-            raise UnknownPageError("exactly one focused enabled input is required")
+            raise UnknownPageError("exactly one enabled input is required")
         field = fields[0]
-        if not field.editable or (not allow_text and field.text.strip()):
-            raise UnknownPageError("focused input must be editable and empty")
+        if not field.editable or field.text.strip():
+            raise UnknownPageError("input must be editable and empty")
         return field
+
+    @staticmethod
+    def _require_focused_same_field(previous, fields) -> None:
+        focused = [field for field in fields if field.focused]
+        if len(focused) != 1:
+            raise UnknownPageError("exactly one focused input is required after tapping")
+        WmsController._require_same_field(previous, focused[0])
+        if not focused[0].editable or focused[0].text.strip():
+            raise UnknownPageError("focused input must be editable and empty")
 
     def _deadline(self) -> float | None:
         if self.timeout_seconds is None:
@@ -607,6 +640,7 @@ class WmsController:
             tuple(observation.latest_tracking_records),
             observation.logid,
             observation.dialog_text,
+            observation.dialog_tracking,
             observation.visible_labels.get("扫描状态"),
         )
 
@@ -632,14 +666,14 @@ class WmsController:
         for attempt in range(self.poll_attempts):
             if observation.state in {PageState.BAG_READY, PageState.SCAN_RESULT}:
                 if (
-                    observation.visible_labels.get("大包号") != session.container_no
+                    not self._bag_matches(observation, session.container_no)
                     or observation.visible_labels.get("排序码") != session.sort_code
                     or not self._warehouse_ok(observation)
                 ):
                     return observation
                 if (
-                    len(observation.focused_inputs) == 1
-                    and not observation.focused_inputs[0].text.strip()
+                    len(observation.input_fields) == 1
+                    and not observation.input_fields[0].text.strip()
                 ):
                     return observation
             elif observation.state is not PageState.DUPLICATE_DIALOG:
