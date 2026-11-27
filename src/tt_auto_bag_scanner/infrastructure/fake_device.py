@@ -375,23 +375,55 @@ class FakeDeviceAdapter:
                 focused=True,
             )
         elif self._dynamic_page == "duplicate_dialog":
-            add("duplicate_error", self._dynamic_error)
-            add("log_id", f"Logid: {self._dynamic_logid}")
             add(
                 "disabled_input",
-                "",
+                self._dynamic_pending_duplicate,
                 class_name="android.widget.EditText",
                 bounds="[10,220][300,270]",
                 focused=False,
                 enabled=False,
             )
-            add(
-                "retry_tracking",
-                "",
-                class_name="android.widget.EditText",
-                bounds="[20,280][400,330]",
-                focused=True,
+            # Mirrors the real WMS dialog: a "提示" subtree with the exact body
+            # (Logid and the submitted tracking) and its own empty input.
+            dialog = ET.SubElement(
+                root,
+                "node",
+                {
+                    "package": self.package_name,
+                    "class": "android.view.View",
+                    "text": "",
+                    "visible-to-user": "true",
+                    "enabled": "true",
+                    "bounds": "[0,90][480,400]",
+                    "resource-id": "",
+                },
             )
+            for text, class_name, bounds, extra in (
+                ("提示", "android.widget.TextView", "[20,90][100,130]", {}),
+                (
+                    f"{self._dynamic_error}。; Logid={self._dynamic_logid},"
+                    "请重新扫描追踪号码，然后扫描正确的容器 "
+                    f"{self._dynamic_pending_duplicate}",
+                    "android.widget.TextView",
+                    "[20,140][460,210]",
+                    {},
+                ),
+                ("", "android.widget.EditText", "[20,280][400,330]", {"focused": "true"}),
+            ):
+                ET.SubElement(
+                    dialog,
+                    "node",
+                    {
+                        "package": self.package_name,
+                        "class": class_name,
+                        "text": text,
+                        "visible-to-user": "true",
+                        "enabled": "true",
+                        "bounds": bounds,
+                        "resource-id": "retry_tracking" if class_name.endswith("EditText") else "",
+                        **extra,
+                    },
+                )
         else:
             add("bag_label", "大包号")
             add("bag_value", self._dynamic_container)

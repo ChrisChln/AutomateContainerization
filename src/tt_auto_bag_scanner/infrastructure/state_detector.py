@@ -15,8 +15,35 @@ from tt_auto_bag_scanner.domain.models import (
 
 _SYSTEM_UI_PACKAGE = "com.android.systemui"
 _DUPLICATE_ERROR = "已扫描包裹已在当前大包中"
-_LOGID = re.compile(r"\bLogid\s*[:：#]?\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
+_LOGID = re.compile(r"\bLogid\s*[:：#=]?\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
+# Exact verified duplicate dialog body (real WMS 单排序): optional full stop, a
+# non-empty Logid, then the fixed instruction ending with the submitted tracking.
+_DUPLICATE_BODY = re.compile(
+    r"已扫描包裹已在当前大包中。?;\s*Logid=([A-Za-z0-9_-]+)[,，]"
+    r"请重新扫描追踪号码，然后扫描正确的容器\s+(\S+)"
+)
+_DIALOG_TITLE = "提示"
+_SINGLE_SORT_TITLES = ("单件扫描", "单排序")
+_LATEST_ANCHOR = "最后扫描的"
+_ALL_RECORDS_LINK = "查看所有记录"
+_LABEL_WORDS = {
+    "大包号": "大包号",
+    "大包": "大包号",
+    "Container": "大包号",
+    "Bag": "大包号",
+    "排序码": "排序码",
+    "分拣码": "排序码",
+    "Sort code": "排序码",
+    "Sort": "排序码",
+    "仓库": "仓库",
+    "Warehouse": "仓库",
+    "总包裹数量": "总包裹数量",
+    "扫描数量": "扫描数量",
+}
+_ERROR_TOKENS = ("error", "失败", "错误", "异常", "logid", _DUPLICATE_ERROR)
 _RECENT_RESOURCE = re.compile(r"recent.*(?:scan|record)|(?:scan|record).*recent", re.IGNORECASE)
+
+Entry = tuple[ET.Element, str, str, str]
 
 
 class TapTargetError(ValueError):
@@ -61,6 +88,45 @@ def _enabled(element: ET.Element) -> bool:
     return value is None or _true(value)
 
 
+def _text(element: ET.Element) -> str:
+    return element.attrib.get("text", "").strip()
+
+
+def _is_text_view(element: ET.Element) -> bool:
+    return element.attrib.get("class", "").endswith("TextView")
+
+
+def _looks_like_error(text: str) -> bool:
+    lowered = text.lower()
+    return any(token in lowered for token in _ERROR_TOKENS)
+
+
+class _Page:
+    """Parsed visible hierarchy with parent links and an optional dialog subtree."""
+
+    def __init__(self, root: ET.Element, entries: list[Entry]) -> None:
+        self.root = root
+        self.entries = entries
+        self.parents = {child: parent for parent in root.iter() for child in parent}
+        titles = [
+            node
+            for node, text, _, class_name in entries
+            if text == _DIALOG_TITLE and class_name.endswith("TextView")
+        ]
+        self.dialog_ambiguous = len(titles) > 1
+        self.dialog_root = self.parents.get(titles[0]) if len(titles) == 1 else None
+
+    def in_dialog(self, node: ET.Element) -> bool:
+        if self.dialog_root is None:
+            return False
+        current = self.parents.get(node)
+        while current is not None:
+            if current is self.dialog_root:
+                return True
+            current = self.parents.get(current)
+        return False
+
+
 class StateDetector:
     def __init__(self, *, target_package: str = "com.ss.android.pda") -> None:
         if not target_package.strip():
@@ -75,13 +141,13 @@ class StateDetector:
         except (ET.ParseError, TypeError):
             return PageObservation(state=PageState.UNKNOWN, redacted_xml_ref=snapshot.redacted_ref)
 
-        entries: list[tuple[ET.Element, str, str, str]] = []
+        entries: list[Entry] = []
         for node in root.iter():
             if not _visible(node):
                 continue
             if node.attrib.get("package") == _SYSTEM_UI_PACKAGE:
                 continue
-            text = node.attrib.get("text", "").strip()
+            text = _text(node)
             resource_id = node.attrib.get("resource-id", "")
             class_name = node.attrib.get("class", "")
             if text or class_name.endswith(("EditText", "TextView", "Button")):
@@ -92,26 +158,27 @@ class StateDetector:
                     )
                 entries.append((node, text, resource_id, class_name))
 
-        labels = self._labels(entries, root)
-        fields = self._focused_inputs(entries)
-        enabled_editors = tuple(
-            node
-            for node, _, _, class_name in entries
-            if class_name.endswith("EditText") and _enabled(node)
-        )
-        text_values = [text for _, text, _, _ in entries if text]
-        all_text = "\n".join(text_values)
-        dialog_text = self._dialog_text(entries)
-        logid = self._extract_logid(all_text)
-        latest = self._recent_tracking(entries, root)
+        page = _Page(root, entries)
+        labels = self._labels(page)
+        input_nodes = self._inputs(page)
+        inputs = tuple(field for _, field in input_nodes)
+        fields = tuple(field for field in inputs if field.focused)
+        dialog_inputs = tuple(field for node, field in input_nodes if page.in_dialog(node))
+        all_text = "\n".join(text for _, text, _, _ in entries if text)
+        logid = self._extract_logid(entries)
+        latest, anchored = self._recent_tracking(page)
+        duplicate_tracking = self._duplicate_tracking(page, logid)
+        dialog_text = self._dialog_text(page)
         state = self._classify(
-            entries,
+            page,
             all_text,
             labels,
-            fields,
+            inputs,
             latest,
+            anchored,
             logid,
-            enabled_editor_count=len(enabled_editors),
+            duplicate=bool(duplicate_tracking),
+            has_error=bool(dialog_text),
         )
 
         return PageObservation(
@@ -122,6 +189,10 @@ class StateDetector:
             dialog_text=dialog_text,
             logid=logid,
             redacted_xml_ref=snapshot.redacted_ref,
+            input_fields=inputs,
+            dialog_inputs=dialog_inputs,
+            dialog_tracking=duplicate_tracking,
+            duplicate_in_bag=bool(duplicate_tracking) and state is PageState.DUPLICATE_DIALOG,
         )
 
     def find_unique_target(
@@ -166,11 +237,9 @@ class StateDetector:
             raise TapTargetError("expected one exact visible target")
         return matches[0]
 
-    def _labels(
-        self, entries: list[tuple[ET.Element, str, str, str]], root: ET.Element
-    ) -> dict[str, str]:
+    def _labels(self, page: _Page) -> dict[str, str]:
         labels: dict[str, str] = {}
-        for _, text, resource_id, _ in entries:
+        for node, text, resource_id, _ in page.entries:
             key = resource_id.rsplit("/", 1)[-1].lower()
             if key in {"bag_value", "container_value", "actual_bag", "actual_container"}:
                 labels["大包号"] = text
@@ -180,83 +249,143 @@ class StateDetector:
                 labels["仓库"] = text
             elif key in {"success_status", "scan_status", "result_status", "rejected_status"}:
                 labels["扫描状态"] = text
-            elif text:
+            elif text and text not in _LABEL_WORDS:
                 labels.setdefault(text, text)
 
-        for parent in root.iter():
-            children = list(parent)
-            for index, child in enumerate(children[:-1]):
-                if not _visible(child):
-                    continue
-                text = child.attrib.get("text", "").strip()
-                next_text = ""
-                for sibling in children[index + 1 :]:
-                    if _visible(sibling):
-                        next_text = sibling.attrib.get("text", "").strip()
-                        if next_text or sibling.attrib.get("resource-id"):
-                            break
-                if not next_text:
-                    continue
-                if text in {"大包号", "大包", "Container", "Bag"}:
-                    labels.setdefault("大包号", next_text)
-                elif text in {"排序码", "分拣码", "Sort code", "Sort"}:
-                    labels.setdefault("排序码", next_text)
-                elif text in {"仓库", "Warehouse"}:
-                    labels.setdefault("仓库", next_text)
+        for node, text, _, _ in page.entries:
+            label = _LABEL_WORDS.get(text)
+            if label is None or label in labels or page.in_dialog(node):
+                continue
+            value = self._value_after_label(page, node)
+            if value:
+                labels[label] = value
         return labels
 
-    def _focused_inputs(
-        self, entries: list[tuple[ET.Element, str, str, str]]
-    ) -> tuple[InputField, ...]:
-        fields: list[InputField] = []
-        for node, text, resource_id, class_name in entries:
-            if not class_name.endswith("EditText") or not _enabled(node):
-                continue
-            bounds = _bounds(node.attrib.get("bounds"))
-            if bounds is None or not _true(node.attrib.get("focused")):
-                continue
-            fields.append(
-                InputField(
-                    resource_id=resource_id,
-                    text=text,
-                    class_name=class_name,
-                    bounds=bounds,
-                    focused=True,
-                    editable=True,
-                )
-            )
-        return tuple(fields)
-
     @staticmethod
-    def _dialog_text(entries: list[tuple[ET.Element, str, str, str]]) -> str:
-        exact_duplicate = next(
-            (
-                text
-                for _, text, _, _ in entries
-                if text == _DUPLICATE_ERROR
-            ),
-            "",
-        )
-        if exact_duplicate:
-            return exact_duplicate
-        for _, text, resource_id, _ in entries:
-            if any(token in resource_id.lower() for token in ("dialog", "error", "reason")):
-                if text:
-                    return text
+    def _value_after_label(page: _Page, node: ET.Element) -> str:
+        """Value is the next visible text sibling of the label or its sole-child wrappers."""
+        current = node
+        for _ in range(3):
+            parent = page.parents.get(current)
+            if parent is None:
+                return ""
+            siblings = [child for child in parent if _visible(child)]
+            if current not in siblings:
+                return ""
+            for sibling in siblings[siblings.index(current) + 1 :]:
+                value = _text(sibling)
+                if value:
+                    return value if _is_text_view(sibling) else ""
+                if sibling.attrib.get("resource-id"):
+                    return ""
+            if len(siblings) != 1:
+                return ""
+            current = parent
         return ""
 
     @staticmethod
-    def _extract_logid(text: str) -> str | None:
-        match = _LOGID.search(text)
-        return match.group(1) if match else None
+    def _inputs(page: _Page) -> list[tuple[ET.Element, InputField]]:
+        fields: list[tuple[ET.Element, InputField]] = []
+        for node, text, resource_id, class_name in page.entries:
+            if not class_name.endswith("EditText") or not _enabled(node):
+                continue
+            bounds = _bounds(node.attrib.get("bounds"))
+            if bounds is None:
+                continue
+            field = InputField(
+                resource_id=resource_id,
+                text=text,
+                class_name=class_name,
+                bounds=bounds,
+                focused=_true(node.attrib.get("focused")),
+                editable=True,
+            )
+            fields.append((node, field))
+        return fields
 
     @staticmethod
-    def _recent_tracking(
-        entries: list[tuple[ET.Element, str, str, str]], root: ET.Element
-    ) -> tuple[str, ...]:
+    def _dialog_text(page: _Page) -> str:
+        if page.dialog_root is not None:
+            for node, text, _, _ in page.entries:
+                if text and text != _DIALOG_TITLE and page.in_dialog(node):
+                    return text
+        for _, text, resource_id, _ in page.entries:
+            if any(token in resource_id.lower() for token in ("dialog", "error", "reason")):
+                if text:
+                    return text
+        for _, text, _, class_name in page.entries:
+            if text and class_name.endswith("TextView") and (
+                text.startswith(_DUPLICATE_ERROR) or "logid" in text.lower()
+            ):
+                return text
+        return ""
+
+    @staticmethod
+    def _duplicate_tracking(page: _Page, logid: str | None) -> str:
+        """Tracking shown by the one exact duplicate body inside the dialog, else ""."""
+        if page.dialog_root is None or not logid:
+            return ""
+        matches = [
+            _DUPLICATE_BODY.fullmatch(text)
+            for node, text, _, class_name in page.entries
+            if text and class_name.endswith("TextView") and page.in_dialog(node)
+        ]
+        bodies = [match for match in matches if match]
+        if len(bodies) != 1 or bodies[0].group(1) != logid:
+            return ""
+        return bodies[0].group(2)
+
+    @staticmethod
+    def _extract_logid(entries: list[Entry]) -> str | None:
+        found = {
+            match.group(1)
+            for _, text, _, _ in entries
+            for match in _LOGID.finditer(text)
+        }
+        return found.pop() if len(found) == 1 else None
+
+    @staticmethod
+    def _anchored_records(page: _Page) -> tuple[str, ...] | None:
+        anchors = [
+            node
+            for node, text, _, class_name in page.entries
+            if text == _LATEST_ANCHOR and class_name.endswith("TextView")
+            and not page.in_dialog(node)
+        ]
+        if len(anchors) != 1:
+            return None
+        parent = page.parents.get(anchors[0])
+        if parent is None:
+            return None
+        siblings = [child for child in parent if _visible(child)]
+        index = siblings.index(anchors[0])
+        following = siblings[index + 1 :]
+        if not following or _text(following[0]) != _ALL_RECORDS_LINK:
+            return None
+        records: list[str] = []
+        for row in following[1:]:
+            texts = [
+                node
+                for node in row.iter()
+                if node is not row and _visible(node) and _text(node)
+            ]
+            if (
+                _text(row)
+                or len(texts) != 1
+                or not _is_text_view(texts[0])
+                or _looks_like_error(_text(texts[0]))
+            ):
+                break
+            records.append(_text(texts[0]))
+        return tuple(records)
+
+    @classmethod
+    def _recent_tracking(cls, page: _Page) -> tuple[tuple[str, ...], bool]:
+        anchored = cls._anchored_records(page)
+        if anchored is not None:
+            return anchored, True
         records = []
-        parent_map = {child: parent for parent in root.iter() for child in parent}
-        for node, text, resource_id, class_name in entries:
+        for node, text, resource_id, class_name in page.entries:
             if (
                 not text
                 or class_name.endswith("EditText")
@@ -265,7 +394,7 @@ class StateDetector:
                 continue
             if any(
                 token in text.lower()
-                for token in ("error", "失败", "已扫描包裹已在当前大包中")
+                for token in ("error", "失败", _DUPLICATE_ERROR)
             ):
                 continue
             normalized_id = resource_id.rsplit("/", 1)[-1]
@@ -273,31 +402,36 @@ class StateDetector:
                 _RECENT_RESOURCE.search(resource_id)
                 and re.search(r"(?:item|row|record)", normalized_id, re.IGNORECASE)
             )
-            ancestor = parent_map.get(node)
+            ancestor = page.parents.get(node)
             in_recent_area = False
             while ancestor is not None:
                 ancestor_id = ancestor.attrib.get("resource-id", "")
                 if _RECENT_RESOURCE.search(ancestor_id):
                     in_recent_area = True
                     break
-                ancestor = parent_map.get(ancestor)
+                ancestor = page.parents.get(ancestor)
             if is_result_id or in_recent_area:
                 records.append(text)
-        return tuple(records)
+        return tuple(records), False
 
     @staticmethod
     def _classify(
-        entries: list[tuple[ET.Element, str, str, str]],
+        page: _Page,
         all_text: str,
         labels: dict[str, str],
-        fields: tuple[InputField, ...],
+        inputs: tuple[InputField, ...],
         latest: tuple[str, ...],
+        anchored: bool,
         logid: str | None,
         *,
-        enabled_editor_count: int,
+        duplicate: bool,
+        has_error: bool,
     ) -> PageState:
-        if _DUPLICATE_ERROR in all_text and logid:
+        entries = page.entries
+        if duplicate and logid:
             return PageState.DUPLICATE_DIALOG
+        if page.dialog_root is not None or page.dialog_ambiguous:
+            return PageState.UNKNOWN
         ids = " ".join(resource_id.lower() for _, _, resource_id, _ in entries)
         lowered = all_text.lower()
         if (
@@ -333,23 +467,28 @@ class StateDetector:
         )
         if home_marker or home_action:
             return PageState.HOME
-        if "单件扫描" in all_text or "single scan" in lowered:
-            bag = labels.get("大包号", "").strip()
-            sort_code = labels.get("排序码", "").strip()
-            if bag and sort_code and enabled_editor_count == 1 and len(fields) == 1:
-                success = any(token in all_text for token in ("扫描成功", "Scan successful"))
-                if latest and success:
-                    return PageState.SCAN_RESULT
-                if labels.get("扫描状态") in {"扫描失败", "Scan rejected"} and logid:
-                    return PageState.SCAN_RESULT
-                return PageState.BAG_READY
-            if (
-                not bag
-                and not sort_code
-                and enabled_editor_count == 1
-                and len(fields) == 1
-                and not fields[0].text
-            ):
-                return PageState.SINGLE_EMPTY
-        return PageState.UNKNOWN
-
+        is_single_sort = any(
+            text in _SINGLE_SORT_TITLES for _, text, _, _ in entries
+        ) or "single scan" in lowered
+        if not is_single_sort:
+            return PageState.UNKNOWN
+        if len(inputs) != 1 or inputs[0].text:
+            return PageState.UNKNOWN
+        bag = labels.get("大包号", "").strip()
+        sort_code = labels.get("排序码", "").strip()
+        if not bag and not sort_code:
+            if latest or has_error:
+                return PageState.UNKNOWN
+            return PageState.SINGLE_EMPTY
+        if not sort_code:
+            return PageState.UNKNOWN
+        if labels.get("扫描状态") in {"扫描失败", "Scan rejected"} and logid and bag:
+            return PageState.SCAN_RESULT
+        if anchored and latest:
+            return PageState.SCAN_RESULT
+        if not bag:
+            return PageState.UNKNOWN
+        success = any(token in all_text for token in ("扫描成功", "Scan successful"))
+        if latest and success:
+            return PageState.SCAN_RESULT
+        return PageState.BAG_READY

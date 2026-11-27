@@ -99,11 +99,20 @@ class PageObservation:
     dialog_text: str = ""
     logid: str | None = None
     redacted_xml_ref: str = ""
+    # Every visible enabled input on the page; focus is reported per field.
+    input_fields: tuple[InputField, ...] = ()
+    # Inputs located inside the recognized WMS dialog subtree only.
+    dialog_inputs: tuple[InputField, ...] = ()
+    # Tracking number printed inside the exact duplicate dialog body.
+    dialog_tracking: str = ""
+    duplicate_in_bag: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "visible_labels", MappingProxyType(dict(self.visible_labels)))
         object.__setattr__(self, "focused_inputs", tuple(self.focused_inputs))
         object.__setattr__(self, "latest_tracking_records", tuple(self.latest_tracking_records))
+        object.__setattr__(self, "input_fields", tuple(self.input_fields))
+        object.__setattr__(self, "dialog_inputs", tuple(self.dialog_inputs))
 
 
 @dataclass(frozen=True, slots=True)
