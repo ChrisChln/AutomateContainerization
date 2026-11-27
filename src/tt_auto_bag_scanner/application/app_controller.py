@@ -16,7 +16,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from tt_auto_bag_scanner.application.import_service import ImportPreview, ImportService
+from tt_auto_bag_scanner.application.import_service import (
+    ImportPreview,
+    ImportService,
+    suggest_column_mapping,
+)
 from tt_auto_bag_scanner.application.startup_recovery import recover_on_startup
 from tt_auto_bag_scanner.application.task_service import TaskService
 from tt_auto_bag_scanner.domain.models import (
@@ -645,11 +649,12 @@ class AppController(QObject):
         self.window.header_row_spin.blockSignals(True)
         self.window.header_row_spin.setValue(header_row)
         self.window.header_row_spin.blockSignals(False)
-        selected_columns = self._import_defaults().get("columns")
+        saved_columns = self._import_defaults().get("columns")
         self.window.set_import_headers(
             headers,
-            selected_columns=(
-                selected_columns if isinstance(selected_columns, Mapping) else None
+            selected_columns=suggest_column_mapping(
+                headers,
+                saved=saved_columns if isinstance(saved_columns, Mapping) else None,
             ),
         )
         self.window.set_import_busy(False)
@@ -686,11 +691,12 @@ class AppController(QObject):
             self.window.set_import_busy(False)
             return
         headers = tuple(result)  # type: ignore[arg-type]
-        selected_columns = self._import_defaults().get("columns")
+        saved_columns = self._import_defaults().get("columns")
         self.window.set_import_headers(
             headers,
-            selected_columns=(
-                selected_columns if isinstance(selected_columns, Mapping) else None
+            selected_columns=suggest_column_mapping(
+                headers,
+                saved=saved_columns if isinstance(saved_columns, Mapping) else None,
             ),
         )
         self.window.set_import_busy(False)
