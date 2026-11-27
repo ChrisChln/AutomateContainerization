@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from enum import StrEnum
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -67,6 +68,25 @@ def suggest_column_mapping(
     return mapping
 
 
+class PreviewOnlyStatus(StrEnum):
+    AWAITING_CONTAINER = "awaiting_container"
+
+
+@dataclass(frozen=True, slots=True)
+class AwaitingContainerRow:
+    """An otherwise eligible row shown in preview; it is never a queue item."""
+
+    id: str
+    tracking: str
+    carrier_key: str
+    sort_code: str
+    outbound_at_utc: datetime
+    source_row_numbers: tuple[int, ...]
+    container_no: str = ""
+    physical_check_id: None = None
+    status: PreviewOnlyStatus = PreviewOnlyStatus.AWAITING_CONTAINER
+
+
 @dataclass(frozen=True, slots=True)
 class ImportIssue:
     source_row_number: int | None
@@ -101,6 +121,8 @@ class ImportPreview:
     source_rows: tuple[SourceRow, ...]
     # Carrier/sort pairs in the report with no configuration yet (container needed).
     unconfigured_carriers: tuple[tuple[str, str], ...] = ()
+    # Rows that pass every filter but still wait for a container; display only.
+    awaiting_container: tuple[AwaitingContainerRow, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "candidate_items", tuple(self.candidate_items))
@@ -121,11 +143,21 @@ class _RowCandidate:
     reported_sort_code: str
     sort_code_choices: tuple[str, ...]
     failure_reason: str | None
+    awaiting_container: bool = False
 
     @property
     def signature(self) -> tuple[str, str, str, str, str]:
         if self.config is None:
-            target = ("unmapped", CarrierConfigService._normalize(self.carrier_value), "", "")
+            target = (
+                "awaiting" if self.awaiting_container else "unmapped",
+                CarrierConfigService._normalize(self.carrier_value),
+                (
+                    CarrierConfigService._normalize(self.reported_sort_code)
+                    if self.awaiting_container
+                    else ""
+                ),
+                "",
+            )
         else:
             target = (
                 self.config.carrier_key,
@@ -242,6 +274,7 @@ class ImportService:
                 failure_reason = "tracking_missing"
 
             config: CarrierConfig | None = None
+            awaiting_container = False
             sort_code_choices: tuple[str, ...] = ()
             row_override = sort_code_overrides.get(source_row.row_number)
             if failure_reason is None:
@@ -298,6 +331,15 @@ class ImportService:
                                     reported_sort_code=selected_code,
                                 )
                                 failure_reason = None
+                    if (
+                        failure_reason in {"unmapped_carrier", "reported_sort_code_unmapped"}
+                        and carrier_value
+                        and sort_value
+                        and row_override is None
+                    ):
+                        # Previewable once a container is configured; never queued now.
+                        awaiting_container = True
+                        failure_reason = None
                     if failure_reason is not None:
                         issues.append(
                             ImportIssue(
@@ -358,6 +400,7 @@ class ImportService:
                     reported_sort_code=sort_value,
                     sort_code_choices=sort_code_choices,
                     failure_reason=failure_reason,
+                    awaiting_container=awaiting_container,
                 )
             )
 
@@ -375,6 +418,7 @@ class ImportService:
             groups[row.tracking].append(row)
 
         candidate_items: list[QueueItem] = []
+        awaiting: list[AwaitingContainerRow] = []
         for tracking, rows in groups.items():
             row_numbers = tuple(sorted(row.source.row_number for row in rows))
             signatures = {row.signature for row in rows}
@@ -453,6 +497,22 @@ class ImportService:
                 continue
 
             config = rows[0].config
+            if config is None and rows[0].awaiting_container:
+                for row in rows:
+                    excluded.append(
+                        ExcludedRow(row.source.row_number, tracking, "awaiting_container")
+                    )
+                awaiting.append(
+                    AwaitingContainerRow(
+                        id=f"awaiting:{task_id}:{tracking}",
+                        tracking=tracking,
+                        carrier_key=rows[0].carrier_value,
+                        sort_code=rows[0].reported_sort_code,
+                        outbound_at_utc=earliest,
+                        source_row_numbers=row_numbers,
+                    )
+                )
+                continue
             if config is None:
                 for row in rows:
                     excluded.append(
@@ -522,6 +582,17 @@ class ImportService:
             conflicts=conflicts_sorted,
             issues=issues_sorted,
             source_rows=workbook.rows,
+            awaiting_container=tuple(
+                sorted(
+                    awaiting,
+                    key=lambda row: (
+                        row.carrier_key.casefold(),
+                        row.sort_code.casefold(),
+                        row.outbound_at_utc,
+                        row.source_row_numbers[0],
+                    ),
+                )
+            ),
             unconfigured_carriers=pending_carrier_pairs(
                 (),
                 (

@@ -355,6 +355,8 @@ class MainWindow(QMainWindow):
         self._unresolved_count = 0
         self._is_running = False
         self._queue_items: list[QueueItem] = []
+        # Preview-only rows that still need a container; never queue items.
+        self._awaiting_rows: list[object] = []
         self._queue_page_size = 200
         self._workspace_page = 0
         self._preview_page = 0
@@ -1018,6 +1020,7 @@ class MainWindow(QMainWindow):
             "unknown": "待核对",
             "rejected": "已拒绝",
             "cancelled": "已取消",
+            "awaiting_container": PENDING_CARRIER_STATE,
         }
         return labels.get(status, status)
 
@@ -1286,11 +1289,12 @@ class MainWindow(QMainWindow):
 
     def _preview_visible_items(self) -> list[QueueItem]:
         query = self.candidate_search_edit.text().strip().casefold()
+        rows = [*self._queue_items, *self._awaiting_rows]
         if not query:
-            return self._queue_items
+            return rows
         return [
             item
-            for item in self._queue_items
+            for item in rows
             if any(
                 query in value.casefold()
                 for value in (
@@ -1739,6 +1743,7 @@ class MainWindow(QMainWindow):
                     "ready",
                 }
                 if preview:
+                    awaiting = item.status.value == "awaiting_container"
                     values = (
                         self._status_text(item.status.value),
                         item.tracking,
@@ -1746,7 +1751,7 @@ class MainWindow(QMainWindow):
                         item.outbound_at_utc.isoformat(timespec="minutes"),
                         f"{age_minutes} 分",
                         item.container_no,
-                        "已核验" if checked else "待核验",
+                        "—" if awaiting else ("已核验" if checked else "待核验"),
                     )
                 else:
                     values = (
@@ -1846,11 +1851,13 @@ class MainWindow(QMainWindow):
             duplicates=duplicate_count,
         )
         self.candidate_search_edit.clear()
+        self._awaiting_rows = list(getattr(preview, "awaiting_container", ()))
         self.set_queue_items(preview.candidate_items)
         self._excluded_rows = excluded_rows
         self.preview_export_button.setEnabled(not self._import_busy and not self._is_running)
         preview_text = (
             f"{summary.source_name} · {len(preview.candidate_items)} 项 · "
+            f"{len(self._awaiting_rows)} {PENDING_CARRIER_STATE} · "
             f"{len(preview.conflicts)} 冲突"
         )
         self.preview_status_label.setText(preview_text)

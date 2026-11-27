@@ -274,3 +274,50 @@ def test_preview_lists_unconfigured_carrier_sort_pairs_from_report(tmp_path):
         ("Carrier A", "SORT-A1"),
         ("Carrier B", "SORT-B1"),
     )
+
+
+def test_eligible_rows_without_container_are_previewed_but_not_queued(tmp_path):
+    path = tmp_path / "awaiting.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Tracking", "Carrier", "Status", "Outbound At", "Sort"])
+    old = datetime(2026, 11, 26, 17, 0)
+    for row in (
+        ["SYN-WAIT", "Carrier A", "复核完成", old, "SORT-A1"],
+        ["SYN-RECENT", "Carrier A", "复核完成", datetime(2026, 11, 26, 17, 59), "SORT-A1"],
+        ["SYN-STATUS", "Carrier A", "已出库", old, "SORT-A1"],
+        ["SYN-NOSORT", "Carrier C", "复核完成", old, ""],
+        ["SYN-READY", "Synthetic Carrier", "复核完成", old, "SORT-A"],
+    ):
+        sheet.append(row)
+    workbook.save(path)
+    mapping = ImportMapping(
+        tracking_column="Tracking",
+        carrier_column="Carrier",
+        status_column="Status",
+        outbound_at_column="Outbound At",
+        report_timezone="UTC",
+        sort_code_column="Sort",
+    )
+
+    preview = ImportService().build_preview(
+        path,
+        mapping,
+        [make_config()],
+        datetime(2026, 11, 26, 18, 0, tzinfo=UTC),
+        task_id="task-awaiting",
+    )
+
+    assert [item.tracking for item in preview.candidate_items] == ["SYN-READY"]
+    assert [
+        (row.tracking, row.carrier_key, row.sort_code, row.container_no)
+        for row in preview.awaiting_container
+    ] == [("SYN-WAIT", "Carrier A", "SORT-A1", "")]
+    reasons = {row.tracking: row.reason for row in preview.excluded_rows}
+    assert reasons == {
+        "SYN-WAIT": "awaiting_container",
+        "SYN-RECENT": "too_recent",
+        "SYN-STATUS": "status_not_exact",
+        "SYN-NOSORT": "unmapped_carrier",
+    }
+    assert preview.summary.eligible_rows == 1

@@ -343,3 +343,38 @@ def test_pending_carrier_row_prefills_editor_and_waits_for_container(app: QAppli
     assert window.sort_code_edit.text() == "SORT-A1"
     assert window.container_edit.text() == ""
     assert window.carrier_enabled_check.isChecked()
+
+
+def test_preview_shows_awaiting_container_rows_without_physical_check(
+    app: QApplication, tmp_path
+) -> None:
+    from openpyxl import Workbook
+
+    from tt_auto_bag_scanner.application.import_service import ImportService
+    from tt_auto_bag_scanner.domain.models import ImportMapping
+
+    path = tmp_path / "awaiting-ui.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["Tracking", "Carrier", "Status", "Outbound At", "Sort"])
+    workbook.active.append(
+        ["SYN-WAIT-UI", "Carrier A", "复核完成", datetime(2026, 11, 26, 17, 0), "SORT-A1"]
+    )
+    workbook.save(path)
+    preview = ImportService().build_preview(
+        path,
+        ImportMapping("Tracking", "Carrier", "Status", "Outbound At", "UTC", 30, "Sort"),
+        [],
+        datetime(2026, 11, 26, 18, 0, tzinfo=UTC),
+        task_id="task-awaiting-ui",
+    )
+    window = MainWindow()
+
+    window.set_import_preview(preview)
+
+    assert window.queue_table.rowCount() == 1
+    assert window.queue_table.item(0, 0).text() == "待填大包号"
+    assert window.queue_table.item(0, 1).text() == "SYN-WAIT-UI"
+    assert window.queue_table.item(0, 5).text() == ""
+    window.queue_table.selectRow(0)
+    assert not window.physical_check_button.isEnabled()
+    assert window.workspace_table.rowCount() == 0

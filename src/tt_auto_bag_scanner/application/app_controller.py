@@ -936,7 +936,8 @@ class AppController(QObject):
         self._last_refreshed_task = None
         self._history_rows_cache = None
         self._refresh_visible_data(force=True)
-        self._set_status("预览已保存")
+        pending = len(self._pending_carriers())
+        self._set_status(f"预览已保存 · {pending} 个承运商待填大包号" if pending else "预览已保存")
 
     @staticmethod
     def _json_value(value: object) -> object:
