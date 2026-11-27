@@ -586,3 +586,194 @@ def test_dynamic_simulator_switches_between_configured_containers() -> None:
     assert session.sort_code == second.sort_code
     assert adapter.adb_write_call_count == 0
 
+
+
+class PolledFakeAdapter(FakeDeviceAdapter):
+    """Static fake whose page changes over successive reads after the scan Enter."""
+
+    def __init__(self, *args, polls_after_scan=(), **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._polls_after_scan = list(polls_after_scan)
+        self._scan_entered = False
+
+    def press_key(self, key: str) -> None:
+        super().press_key(key)
+        if key.upper() == "ENTER" and self._entered_text[-1:] == ["SYN_TRACK_NEW"]:
+            self._scan_entered = True
+
+    def snapshot_xml(self):
+        if self._scan_entered and self._polls_after_scan:
+            self._current_xml = self._polls_after_scan.pop(0)
+        return super().snapshot_xml()
+
+
+def _previous_success_xml() -> str:
+    return read_fixture("scan_success.xml").replace("SYN_TRACK_NEW", "SYN_TRACK_PREV")
+
+
+def _previous_rejected_xml(logid: str) -> str:
+    return _previous_success_xml().replace(
+        'text="扫描成功" visible-to-user="true" enabled="true" bounds="[0,360][150,400]" '
+        'resource-id="success_status" />',
+        'text="扫描失败" visible-to-user="true" enabled="true" bounds="[0,360][150,400]" '
+        'resource-id="rejected_status" />\n  <node package="com.ss.android.pda" '
+        f'class="android.widget.TextView" text="Logid: {logid}" visible-to-user="true" '
+        'enabled="true" bounds="[0,410][300,450]" resource-id="log_id" />',
+    )
+
+
+def make_polled_controller(before_xml: str, *polls: str):
+    adapter = PolledFakeAdapter(
+        initial_xml=read_fixture("single_empty.xml"),
+        devices=(),
+        snapshots_after_enter=(read_fixture("bag_ready.xml"),),
+        polls_after_scan=polls,
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE", poll_interval_seconds=0)
+    session = controller.open_bag(make_config())
+    adapter._current_xml = before_xml
+    return adapter, controller, session
+
+
+def test_result_polling_waits_past_the_previous_items_result_page() -> None:
+    previous = _previous_success_xml()
+    adapter, controller, session = make_polled_controller(
+        previous, previous, read_fixture("scan_success.xml")
+    )
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-stale"
+    )
+
+    assert result.outcome is ScanOutcome.SUCCESS
+    assert [action for action in adapter.actions if action[0] == "press_key"].count(
+        ("press_key", "ENTER")
+    ) == 2
+
+
+def test_rejection_for_another_tracking_is_unknown_not_rejected() -> None:
+    _, controller, session = make_polled_controller(
+        _previous_rejected_xml("SYN-LOG-OLD"), _previous_rejected_xml("SYN-LOG-NEW")
+    )
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-other-reject"
+    )
+
+    assert result.outcome is ScanOutcome.UNKNOWN
+
+
+def test_duplicate_requires_exact_dialog_text() -> None:
+    altered = read_fixture("duplicate_dialog.xml").replace(
+        'text="已扫描包裹已在当前大包中"', 'text="已扫描包裹已在当前大包中（其他大包）"'
+    )
+    _, controller, session = make_controller(read_fixture("bag_ready.xml"), altered)
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-dup-text"
+    )
+
+    assert result.outcome is ScanOutcome.UNKNOWN
+
+
+def test_success_page_with_error_dialog_is_unknown() -> None:
+    with_error = read_fixture("scan_success.xml").replace(
+        "</hierarchy>",
+        '  <node package="com.ss.android.pda" class="android.widget.TextView" '
+        'text="SYN_TRACK_NEW 异常" visible-to-user="true" enabled="true" '
+        'bounds="[0,410][300,450]" resource-id="error_text" />\n</hierarchy>',
+    )
+    _, controller, session = make_controller(read_fixture("bag_ready.xml"), with_error)
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-error-dialog"
+    )
+
+    assert result.outcome is ScanOutcome.UNKNOWN
+
+
+def test_result_polling_stops_at_monotonic_deadline(monkeypatch) -> None:
+    import tt_auto_bag_scanner.infrastructure.wms_controller as module
+
+    adapter = FakeDeviceAdapter(
+        initial_xml=read_fixture("single_empty.xml"),
+        devices=(),
+        snapshots_after_enter=(read_fixture("bag_ready.xml"), read_fixture("bag_ready.xml")),
+    )
+    controller = WmsController(
+        adapter,
+        warehouse="SYN-WAREHOUSE",
+        poll_attempts=30,
+        poll_interval_seconds=0,
+        timeout_seconds=1.0,
+    )
+    session = controller.open_bag(make_config())
+    clock = iter(float(value * 100) for value in range(1000))
+    monkeypatch.setattr(module, "monotonic", lambda: next(clock), raising=False)
+    item = make_item()
+    reads_before = [a[0] for a in adapter.actions].count("snapshot_xml")
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-deadline"
+    )
+
+    reads = [a[0] for a in adapter.actions].count("snapshot_xml") - reads_before
+    assert result.outcome is ScanOutcome.UNKNOWN
+    assert reads < 10
+
+
+def _without_warehouse(name: str) -> str:
+    return "\n".join(
+        line for line in read_fixture(name).splitlines() if "warehouse_" not in line
+    )
+
+
+def test_warehouse_verified_on_home_covers_pages_without_warehouse_label() -> None:
+    adapter = FakeDeviceAdapter(
+        initial_xml=read_fixture("home.xml"),
+        snapshots_after_tap=(
+            _without_warehouse("container_menu.xml"),
+            _without_warehouse("single_empty.xml"),
+        ),
+        snapshots_after_enter=(
+            _without_warehouse("bag_ready.xml"),
+            _without_warehouse("scan_success.xml"),
+        ),
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+    session = controller.open_bag(make_config())
+    item = make_item()
+
+    result = controller.submit_once(
+        item, session, physical_check=make_check(item), attempt_id="attempt-home-wh"
+    )
+
+    assert result.outcome is ScanOutcome.SUCCESS
+
+
+def test_page_without_warehouse_label_requires_prior_home_verification() -> None:
+    adapter = FakeDeviceAdapter(
+        initial_xml=_without_warehouse("single_empty.xml"),
+        devices=(),
+        snapshots_after_enter=(_without_warehouse("bag_ready.xml"),),
+    )
+    controller = WmsController(adapter, warehouse="SYN-WAREHOUSE")
+
+    with pytest.raises(SubmissionBlocked):
+        controller.open_bag(make_config())
+
+    assert adapter.entered_text == ()
+
+
+def test_home_with_other_warehouse_never_navigates() -> None:
+    adapter = FakeDeviceAdapter(initial_xml=read_fixture("home.xml"))
+    controller = WmsController(adapter, warehouse="SYN-OTHER")
+
+    with pytest.raises(SubmissionBlocked):
+        controller.open_bag(make_config())
+
+    assert [a for a in adapter.actions if a[0] == "tap"] == []

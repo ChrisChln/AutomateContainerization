@@ -13,6 +13,7 @@ from tt_auto_bag_scanner.domain.models import (
     XmlSnapshot,
 )
 
+_SYSTEM_UI_PACKAGE = "com.android.systemui"
 _DUPLICATE_ERROR = "已扫描包裹已在当前大包中"
 _LOGID = re.compile(r"\bLogid\s*[:：#]?\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
 _RECENT_RESOURCE = re.compile(r"recent.*(?:scan|record)|(?:scan|record).*recent", re.IGNORECASE)
@@ -77,6 +78,8 @@ class StateDetector:
         entries: list[tuple[ET.Element, str, str, str]] = []
         for node in root.iter():
             if not _visible(node):
+                continue
+            if node.attrib.get("package") == _SYSTEM_UI_PACKAGE:
                 continue
             text = node.attrib.get("text", "").strip()
             resource_id = node.attrib.get("resource-id", "")
@@ -173,7 +176,7 @@ class StateDetector:
                 labels["大包号"] = text
             elif key in {"sort_value", "actual_sort", "sort_code"}:
                 labels["排序码"] = text
-            elif key in {"warehouse_value", "actual_warehouse"}:
+            elif key in {"warehouse_value", "actual_warehouse", "wms_house_name_text"}:
                 labels["仓库"] = text
             elif key in {"success_status", "scan_status", "result_status", "rejected_status"}:
                 labels["扫描状态"] = text
@@ -297,10 +300,14 @@ class StateDetector:
             return PageState.DUPLICATE_DIALOG
         ids = " ".join(resource_id.lower() for _, _, resource_id, _ in entries)
         lowered = all_text.lower()
-        if "login" in lowered or "password" in ids or "登录" in all_text:
+        if (
+            "login" in ids
+            or "password" in ids
+            or any(text in {"登录", "Login", "登录页"} for _, text, _, _ in entries)
+        ):
             return PageState.LOGIN
         has_container_menu_title = any(
-            text in all_text for text in ("大包管理", "容器管理", "Container menu")
+            text in all_text for text in ("大包管理", "容器管理", "集装箱化", "Container menu")
         ) or "container_menu" in ids
         has_single_or_mixed_sort = any(
             text in all_text for text in ("单排序", "混合排序", "Single sort", "Mixed sort")

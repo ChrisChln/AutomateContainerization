@@ -64,7 +64,7 @@ class InspectingController:
         )
 
 
-def make_repository(path, item_count=1):
+def make_repository(path, item_count=1, unchecked=()):
     repository = TaskRepository(path)
     items = [
         QueueItem(
@@ -92,7 +92,9 @@ def make_repository(path, item_count=1):
     )
     repository.create_task(task, items)
     checks = []
-    for candidate in items:
+    for index, candidate in enumerate(items):
+        if index in unchecked:
+            continue
         check = PhysicalCheck(
             id=f"check-{candidate.id}",
             item_id=candidate.id,
@@ -116,7 +118,7 @@ def make_repository(path, item_count=1):
         session_id="SESSION-SYNTHETIC",
         verified_at_utc=NOW,
     )
-    return repository, item, checks[0], session
+    return repository, item, checks[0] if checks else None, session
 
 
 def test_worker_persists_before_single_controller_call_and_finishes_success(tmp_path) -> None:
@@ -333,3 +335,18 @@ def test_task_service_serializes_workers_across_tasks(tmp_path) -> None:
     assert not worker.is_alive()
     assert controller.calls == 1
     assert repository.get_task(first_item.task_id).state is TaskState.COMPLETED
+
+
+def test_worker_skips_unverified_items_and_submits_verified_ones(tmp_path) -> None:
+    repository, first, _, session = make_repository(
+        tmp_path / "scanner.sqlite3", item_count=2, unchecked=(0,)
+    )
+    controller = InspectingController(repository)
+    worker = ScanWorker(repository, first.task_id, controller, lambda _: session)
+
+    worker.run()
+
+    assert controller.calls == 1
+    assert repository.get_item(first.id).status is ItemStatus.WAIT_PHYSICAL
+    assert repository.get_item("item-synthetic-1").status is ItemStatus.SUCCESS
+    assert repository.get_task(first.task_id).state is TaskState.PAUSED
