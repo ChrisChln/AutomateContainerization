@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -25,6 +25,42 @@ from tt_auto_bag_scanner.infrastructure.excel_parser import (
     ExcelParser,
     SourceRow,
 )
+
+# Exact header names of the standard outbound report and the generated template.
+STANDARD_COLUMN_HEADERS: Mapping[str, tuple[str, ...]] = {
+    "tracking": ("物流运单号", "tracking"),
+    "carrier": ("快递公司", "carrier"),
+    "status": ("包裹状态", "status"),
+    "outbound_at": ("出库时间", "outbound_at"),
+    "sort_code": ("Sort Code", "sort_code"),
+}
+
+
+def suggest_column_mapping(
+    headers: Iterable[str],
+    *,
+    saved: Mapping[str, object] | None = None,
+) -> dict[str, str]:
+    """Preselect columns: a still-present saved choice, else one exact standard header.
+
+    Matching is exact after trimming; ambiguous (repeated) headers are not selected.
+    The user still reviews the mapping before a preview is built.
+    """
+    header_list = [str(header) for header in headers]
+    present = set(header_list)
+    by_name: dict[str, list[str]] = defaultdict(list)
+    for header in header_list:
+        by_name[header.strip()].append(header)
+    mapping: dict[str, str] = {}
+    for key, names in STANDARD_COLUMN_HEADERS.items():
+        saved_header = (saved or {}).get(key)
+        if isinstance(saved_header, str) and saved_header and saved_header in present:
+            mapping[key] = saved_header
+            continue
+        matches = [header for name in names for header in by_name.get(name, ())]
+        if len(matches) == 1:
+            mapping[key] = matches[0]
+    return mapping
 
 
 @dataclass(frozen=True, slots=True)
