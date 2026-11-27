@@ -955,6 +955,11 @@ class AppController(QObject):
             return
         items = self.repository.list_items(self.current_task_id)
         missing = sum(item.status is ItemStatus.WAIT_PHYSICAL for item in items)
+        if missing and self.settings.get("skip_physical_check") is True:
+            if not self._record_authorized_skips(items, missing):
+                return
+            items = self.repository.list_items(self.current_task_id)
+            missing = sum(item.status is ItemStatus.WAIT_PHYSICAL for item in items)
         if missing:
             self._set_status(f"{missing} 项待实物核验")
             return
@@ -974,6 +979,28 @@ class AppController(QObject):
                 return
         self.window.navigate_to("扫描工作区")
         self._refresh_visible_data()
+
+    def _record_authorized_skips(self, items: Sequence[QueueItem], missing: int) -> bool:
+        """Operator-confirmed skip; each item keeps an auditable authorized_skip record."""
+        operator = self.window.confirm_physical_skip(missing, self._actor)
+        if not operator:
+            self._set_status("已取消跳过实物核验")
+            return False
+        now = datetime.now(UTC)
+        try:
+            for item in items:
+                if item.status is not ItemStatus.WAIT_PHYSICAL:
+                    continue
+                check = self.physical_check_service.record_authorized_skip(
+                    item, operator=operator, checked_at_utc=now
+                )
+                self.repository.record_physical_check(check, actor=operator)
+        except Exception as exc:
+            self._show_error(f"跳过核验未完成：{exc}")
+            self._refresh_visible_data(force=True)
+            return False
+        self._set_status(f"{missing} 项已授权跳过实物核验")
+        return True
 
     def _prepare_simulated_session(
         self, item: QueueItem, items: Sequence[QueueItem]

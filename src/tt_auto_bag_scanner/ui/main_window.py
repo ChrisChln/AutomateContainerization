@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -765,6 +766,7 @@ class MainWindow(QMainWindow):
         self.minimum_age_spin.setValue(30)
         self.minimum_age_spin.setSuffix(" 分钟")
         self.confirm_minimum_age_check = QCheckBox("确认筛选阈值")
+        self.skip_physical_check = QCheckBox("跳过实物核验")
         self.save_settings_button = QPushButton("保存设置")
         self.backup_button = QPushButton("备份本地记录")
         self.restore_button = QPushButton("恢复记录")
@@ -786,6 +788,7 @@ class MainWindow(QMainWindow):
         form.addWidget(QLabel("最小出库时间"), 6, 2)
         form.addWidget(self.minimum_age_spin, 6, 3)
         form.addWidget(self.confirm_minimum_age_check, 6, 4)
+        form.addWidget(self.skip_physical_check, 7, 1, 1, 2)
         form.addWidget(self.save_settings_button, 7, 4)
         form.addWidget(self.backup_button, 8, 3)
         form.addWidget(self.restore_button, 8, 4)
@@ -1387,10 +1390,23 @@ class MainWindow(QMainWindow):
                 "response_timeout_seconds": int(self.response_timeout_spin.value()),
                 "minimum_age_minutes": int(self.minimum_age_spin.value()),
                 "minimum_age_confirmed": self.confirm_minimum_age_check.isChecked(),
+                "skip_physical_check": self.skip_physical_check.isChecked(),
                 "real_mode_authorized": self.device_authorize_check.isChecked(),
                 "mode": self._mode.value,
             }
         )
+
+    def confirm_physical_skip(self, count: int, operator: str) -> str | None:
+        """Ask the operator to authorize skipping; returns their name or None."""
+        name, accepted = QInputDialog.getText(
+            self,
+            "跳过实物核验",
+            f"{count} 项未核验，将以“授权跳过”记录并允许提交 WMS。操作员：",
+            QLineEdit.EchoMode.Normal,
+            operator,
+        )
+        name = name.strip()
+        return name if accepted and name else None
 
     def set_settings(self, settings: Mapping[str, object]) -> None:
         self.operator_id_edit.setText(str(settings.get("operator_id", "")))
@@ -1401,6 +1417,7 @@ class MainWindow(QMainWindow):
         self.confirm_minimum_age_check.setChecked(
             bool(settings.get("minimum_age_confirmed", False))
         )
+        self.skip_physical_check.setChecked(settings.get("skip_physical_check") is True)
         authorized = bool(settings.get("real_mode_authorized", False))
         self.device_authorize_check.blockSignals(True)
         self.device_authorize_check.setChecked(authorized)

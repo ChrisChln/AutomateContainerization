@@ -4,6 +4,7 @@
 - Keep simulator mode isolated and default. Do not send commands to a real PDA or WMS during automated tests.
 - Never close containers, dispatch parcels, mutate inventory, save WMS credentials, or retry an ambiguous submission.
 - A real submission requires a valid per-item physical check, a verified device/session/container/sort, and an authorized explicit start.
+- Owner-approved exception (2026-11-27): when the 设置 option "跳过实物核验" is on (default off), an operator-confirmed `authorized_skip` record per item stands in for the physical check. Keep it opt-in, confirmed per task, and auditable; never enable it by default or skip the record.
 - Persist `IN_FLIGHT` and its attempt before sending one Enter. Convert uncertain outcomes to `UNKNOWN` and pause for human reconciliation.
 - Do not hardcode sample shipment numbers, device serials, container numbers, or carrier mappings.
 - Write and run a focused failing test before production code. Keep test fixtures synthetic or redacted.

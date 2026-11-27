@@ -314,3 +314,102 @@ def test_report_carriers_become_pending_rows_until_container_is_filled(
 
     controller.close()
     window.close()
+
+
+def _task_waiting_for_physical_checks(app: QApplication, tmp_path, *, skip: bool):
+    report = tmp_path / "synthetic-skip.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["tracking", "carrier", "status", "outbound_at", "sort_code"])
+    outbound_at = (datetime.now(ZoneInfo("America/New_York")) - timedelta(hours=2)).replace(
+        tzinfo=None
+    )
+    for tracking in ("TRACKING-SYN-S1", "TRACKING-SYN-S2"):
+        sheet.append([tracking, "CARRIER-SYN-S", "复核完成", outbound_at, "SORT-SYN-S"])
+    workbook.save(report)
+    data_dir = tmp_path / "data"
+    window = MainWindow()
+    controller = AppController(window, data_dir=data_dir, poll_interval_ms=50)
+    controller.settings["skip_physical_check"] = skip
+    controller.repository.save_carrier_configs(
+        [
+            CarrierConfig(
+                carrier_key="CARRIER-SYN-S",
+                display_name="CARRIER-SYN-S",
+                aliases=(),
+                sort_code="SORT-SYN-S",
+                container_no="CONTAINER-SYN-S",
+                enabled=True,
+                version=1,
+                updated_at_utc=datetime.now(UTC),
+            )
+        ],
+        actor="operator-test",
+    )
+    window.set_report_path(str(report))
+    controller._build_preview(
+        {
+            "path": str(report),
+            "sheet_name": sheet.title,
+            "header_row": 1,
+            "tracking": "tracking",
+            "carrier": "carrier",
+            "status": "status",
+            "outbound_at": "outbound_at",
+            "sort_code": "sort_code",
+            "report_timezone": "America/New_York",
+            "threshold_minutes": 30,
+            "threshold_confirmed": True,
+        }
+    )
+    deadline = time.monotonic() + 5
+    while controller.current_task_id is None and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    assert controller.current_task_id is not None
+    return window, controller
+
+
+def test_review_without_skip_setting_still_requires_physical_checks(
+    app: QApplication, tmp_path, monkeypatch
+) -> None:
+    window, controller = _task_waiting_for_physical_checks(app, tmp_path, skip=False)
+    asked: list[int] = []
+    monkeypatch.setattr(
+        window, "confirm_physical_skip", lambda count, operator: asked.append(count)
+    )
+
+    controller._review_task()
+
+    assert asked == []
+    items = controller.repository.list_items(controller.current_task_id)
+    assert {item.status for item in items} == {ItemStatus.WAIT_PHYSICAL}
+    assert controller.repository.get_task(controller.current_task_id).state is TaskState.DRAFT
+    controller.close()
+    window.close()
+
+
+def test_review_with_skip_setting_records_authorized_skip_after_confirmation(
+    app: QApplication, tmp_path, monkeypatch
+) -> None:
+    window, controller = _task_waiting_for_physical_checks(app, tmp_path, skip=True)
+    monkeypatch.setattr(window, "confirm_physical_skip", lambda count, operator: None)
+
+    controller._review_task()
+
+    items = controller.repository.list_items(controller.current_task_id)
+    assert {item.status for item in items} == {ItemStatus.WAIT_PHYSICAL}
+
+    monkeypatch.setattr(
+        window, "confirm_physical_skip", lambda count, operator: "operator-syn-skip"
+    )
+    controller._review_task()
+
+    items = controller.repository.list_items(controller.current_task_id)
+    assert {item.status for item in items} == {ItemStatus.READY}
+    checks = [controller.repository.get_physical_check(item.id) for item in items]
+    assert {check.method.value for check in checks} == {"authorized_skip"}
+    assert {check.operator for check in checks} == {"operator-syn-skip"}
+    assert controller.repository.get_task(controller.current_task_id).state is TaskState.READY
+    controller.close()
+    window.close()

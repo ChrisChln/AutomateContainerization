@@ -378,3 +378,16 @@ def test_preview_shows_awaiting_container_rows_without_physical_check(
     window.queue_table.selectRow(0)
     assert not window.physical_check_button.isEnabled()
     assert window.workspace_table.rowCount() == 0
+
+
+def test_skip_physical_check_setting_defaults_off_and_is_saved(app: QApplication) -> None:
+    window = MainWindow()
+    saved: list[dict] = []
+    window.settings_save_requested.connect(saved.append)
+
+    window.set_settings({})
+    assert not window.skip_physical_check.isChecked()
+    window.skip_physical_check.setChecked(True)
+    window.save_settings_button.click()
+
+    assert saved[-1]["skip_physical_check"] is True

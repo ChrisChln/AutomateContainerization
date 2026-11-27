@@ -42,6 +42,27 @@ class PhysicalCheckService:
             evidence_ref=evidence_ref.strip(),
         )
 
+    def record_authorized_skip(
+        self,
+        item: QueueItem,
+        *,
+        operator: str,
+        checked_at_utc: datetime,
+    ) -> PhysicalCheck:
+        """Audit record for an operator who explicitly skipped the physical check."""
+        self._validate_item(item)
+        self._validate_actor_and_time(operator, checked_at_utc)
+        return PhysicalCheck(
+            id=str(uuid4()),
+            item_id=item.id,
+            tracking=item.tracking,
+            container_no=item.container_no,
+            operator=operator.strip(),
+            checked_at_utc=checked_at_utc,
+            method=PhysicalCheckMethod.AUTHORIZED_SKIP,
+            evidence_ref=f"authorized-skip:{uuid4()}",
+        )
+
     def record_barcode(
         self,
         item: QueueItem,

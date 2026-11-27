@@ -52,6 +52,8 @@ class ScanOutcome(StrEnum):
 class PhysicalCheckMethod(StrEnum):
     MANUAL_CONFIRMATION = "manual_confirmation"
     BARCODE_MATCH = "barcode_match"
+    # Site-approved exception: the operator explicitly skipped the physical check.
+    AUTHORIZED_SKIP = "authorized_skip"
 
 
 class DeviceMode(StrEnum):
