@@ -26,6 +26,9 @@ from tt_auto_bag_scanner.infrastructure.excel_parser import (
     SourceRow,
 )
 
+# Exact text time formats of the standard outbound report (month/day/4-digit year).
+_STANDARD_TIME_FORMATS = ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p")
+
 # Exact header names of the standard outbound report and the generated template.
 STANDARD_COLUMN_HEADERS: Mapping[str, tuple[str, ...]] = {
     "tracking": ("物流运单号", "tracking"),
@@ -569,7 +572,16 @@ class ImportService:
             try:
                 parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
             except ValueError:
-                return None, "invalid_time"
+                parsed = None
+                # The standard outbound report exports US-style local time text.
+                for time_format in _STANDARD_TIME_FORMATS:
+                    try:
+                        parsed = datetime.strptime(text, time_format)
+                        break
+                    except ValueError:
+                        continue
+                if parsed is None:
+                    return None, "invalid_time"
         else:
             return None, "invalid_time"
 

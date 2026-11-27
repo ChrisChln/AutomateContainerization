@@ -36,6 +36,9 @@ from PySide6.QtWidgets import (
 
 from tt_auto_bag_scanner.domain.models import DeviceInfo, DeviceMode, ItemStatus, QueueItem
 
+# Site-confirmed report timezone; a saved choice still takes precedence.
+DEFAULT_REPORT_TIMEZONE = "America/New_York"
+
 
 class PhysicalCheckDialog(QDialog):
     """Require a named operator to attest one parcel/container pairing."""
@@ -1028,6 +1031,11 @@ class MainWindow(QMainWindow):
                 font-size: 13px;
                 color: #19232c;
             }
+            QDialog, QMessageBox {
+                background: #ffffff;
+                color: #19232c;
+            }
+            QMessageBox QLabel { background: transparent; color: #19232c; }
             QWidget#navigationRail {
                 background: #f6f7f8;
                 border-right: 1px solid #dce2e5;
@@ -1570,7 +1578,7 @@ class MainWindow(QMainWindow):
                     combo.setCurrentIndex(index)
 
     def apply_import_defaults(self, defaults: Mapping[str, object]) -> None:
-        timezone = str(defaults.get("report_timezone") or "")
+        timezone = str(defaults.get("report_timezone") or DEFAULT_REPORT_TIMEZONE)
         timezone_index = self.timezone_combo.findData(timezone)
         if timezone_index >= 0:
             self.timezone_combo.setCurrentIndex(timezone_index)

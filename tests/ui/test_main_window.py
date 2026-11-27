@@ -308,3 +308,14 @@ def test_scan_queue_tables_page_large_candidate_lists(app: QApplication) -> None
     assert window._table_global_index(window.queue_table, 0) == 200
     window.close()
     app.processEvents()
+
+
+def test_report_timezone_defaults_to_new_york_without_saved_choice(app: QApplication) -> None:
+    window = MainWindow()
+    window.set_timezones(["America/Chicago", "America/New_York", "UTC"])
+
+    window.apply_import_defaults({})
+    assert window.timezone_combo.currentData() == "America/New_York"
+
+    window.apply_import_defaults({"report_timezone": "UTC"})
+    assert window.timezone_combo.currentData() == "UTC"
