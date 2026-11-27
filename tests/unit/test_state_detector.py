@@ -151,3 +151,37 @@ def test_login_word_inside_other_text_is_not_a_login_page() -> None:
     observation = StateDetector(target_package="com.ss.android.pda").detect(snapshot)
 
     assert observation.state is PageState.HOME
+
+
+def test_real_containerization_page_is_container_menu_with_one_single_sort_target() -> None:
+    xml = (FIXTURES / "real_containerization.xml").read_text(encoding="utf-8")
+    snapshot = XmlSnapshot(
+        xml=xml, captured_at_utc=datetime.now(UTC), package_name="com.ss.android.pda"
+    )
+    detector = StateDetector(target_package="com.ss.android.pda")
+
+    observation = detector.detect(snapshot)
+    target = detector.find_unique_target(
+        snapshot, expected_state=PageState.CONTAINER_MENU, exact_texts=("单排序",)
+    )
+
+    assert observation.state is PageState.CONTAINER_MENU
+    assert target.text == "单排序"
+    assert target.bounds == (45, 120, 382, 154)
+
+
+def test_real_wms_home_reads_warehouse_and_one_group_bag_target() -> None:
+    xml = (FIXTURES / "real_wms_home.xml").read_text(encoding="utf-8")
+    snapshot = XmlSnapshot(
+        xml=xml, captured_at_utc=datetime.now(UTC), package_name="com.ss.android.pda"
+    )
+    detector = StateDetector(target_package="com.ss.android.pda")
+
+    observation = detector.detect(snapshot)
+    target = detector.find_unique_target(
+        snapshot, expected_state=PageState.HOME, exact_texts=("组大包",)
+    )
+
+    assert observation.state is PageState.HOME
+    assert observation.visible_labels["仓库"] == "WAREHOUSE_TEST"
+    assert target.text == "组大包"
