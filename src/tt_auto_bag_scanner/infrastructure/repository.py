@@ -32,6 +32,8 @@ from tt_auto_bag_scanner.domain.models import (
 )
 from tt_auto_bag_scanner.domain.states import StateTransitionError, transition_task
 
+# Evidence prefix for a duplicate recovery refused before anything was typed.
+RECOVERY_NOT_ATTEMPTED = "recovery not attempted:"
 
 class RepositoryError(RuntimeError):
     """Raised when a persistence operation cannot preserve scanner invariants."""
@@ -392,7 +394,11 @@ class TaskRepository:
         rows = (
             self._connection()
             .execute(
-                "SELECT * FROM task_items WHERE task_id = ? ORDER BY queue_index",
+                """SELECT i.*, CASE WHEN i.status = 'rejected' THEN (
+                       SELECT a.error_code FROM attempts a WHERE a.item_id = i.id
+                       ORDER BY a.attempt_no DESC LIMIT 1
+                   ) END AS last_attempt_error
+                   FROM task_items i WHERE i.task_id = ? ORDER BY i.queue_index""",
                 (task_id,),
             )
             .fetchall()
@@ -682,7 +688,7 @@ class TaskRepository:
                 raise RepositoryError("physical check is stale or mismatched")
             if not physical_check.is_valid_for(item) or physical_check.id != stored_check.id:
                 raise RepositoryError("provided physical check does not match persisted evidence")
-            if self._has_unresolved_locked(connection, item.task_id):
+            if self._has_blocking_unresolved_locked(connection, item.task_id):
                 raise RepositoryError("unresolved submission or duplicate recovery blocks the task")
             previous = int(
                 connection.execute(
@@ -866,6 +872,37 @@ class TaskRepository:
                 at_utc=now,
             )
 
+    def mark_attempt_not_sent(self, attempt_id: str, reason: str, *, actor: str) -> None:
+        now = _utc_now()
+        with self._transaction() as connection:
+            attempt = connection.execute(
+                """SELECT a.item_id, i.task_id FROM attempts a
+                   JOIN task_items i ON i.id = a.item_id
+                   WHERE a.id = ? AND a.status = 'in_flight' AND i.status = 'in_flight'""",
+                (attempt_id,),
+            ).fetchone()
+            if attempt is None:
+                raise RepositoryError("only an in-flight attempt can be marked not sent")
+            connection.execute(
+                """UPDATE attempts SET status = 'rejected', outcome = 'not_sent',
+                   finished_at_utc = ?, error_code = 'not_sent', after_json = ? WHERE id = ?""",
+                (_iso(now), _json({"reason": reason}), attempt_id),
+            )
+            connection.execute(
+                "UPDATE task_items SET status = 'ready', updated_at_utc = ? WHERE id = ?",
+                (_iso(now), attempt["item_id"]),
+            )
+            self._event(
+                connection,
+                attempt["task_id"],
+                "attempt_not_sent",
+                actor,
+                {"reason": reason},
+                item_id=attempt["item_id"],
+                attempt_id=attempt_id,
+                at_utc=now,
+            )
+
     def mark_attempt_unknown(
         self,
         attempt_id: str,
@@ -930,7 +967,10 @@ class TaskRepository:
         result: RecoveryResult,
         *,
         actor: str = "scanner",
+        abandoned: bool = False,
     ) -> None:
+        """``abandoned``: refused before anything was typed; the item stays ALREADY_IN_BAG
+        and the task is not blocked (the next item re-verifies the bag page)."""
         now = result.observed_at_utc
         with self._transaction() as connection:
             row = connection.execute(
@@ -956,6 +996,10 @@ class TaskRepository:
             if row["status"] != "in_flight":
                 raise RepositoryError("duplicate recovery has already been resolved")
             status = "recovered" if result.recovered else "failed"
+            if abandoned and not (result.evidence_ref or "").startswith(
+                RECOVERY_NOT_ATTEMPTED
+            ):
+                raise RepositoryError("abandoned recovery evidence must record why")
             connection.execute(
                 """UPDATE duplicate_recoveries SET status = ?, evidence_ref = ?,
                    observed_at_utc = ?, updated_at_utc = ? WHERE attempt_id = ?""",
@@ -981,7 +1025,7 @@ class TaskRepository:
                 attempt_id=result.attempt_id,
                 at_utc=now,
             )
-            if not result.recovered:
+            if not result.recovered and not abandoned:
                 connection.execute(
                     "UPDATE tasks SET state = 'blocked', updated_at_utc = ? WHERE id = ?",
                     (_iso(now), row["task_id"]),
@@ -1169,7 +1213,7 @@ class TaskRepository:
                     ).fetchone()[0]
                 )
             elif current_state is TaskState.STOPPED and target is TaskState.RUNNING:
-                unresolved = int(self._has_unresolved_locked(connection, task_id))
+                unresolved = int(self._has_blocking_unresolved_locked(connection, task_id))
             else:
                 unresolved = 0
             try:
@@ -1311,6 +1355,14 @@ class TaskRepository:
         )
         return dict(row) if row is not None else None
 
+    def activity_revision(self, task_id: str) -> tuple[int | None, int | None]:
+        row = self._connection().execute(
+            """SELECT (SELECT MAX(id) FROM events WHERE task_id = ?),
+                      (SELECT MAX(id) FROM logs WHERE task_id = ?)""",
+            (task_id, task_id),
+        ).fetchone()
+        return row[0], row[1]
+
     def events(self, *, task_id: str, item_id: str | None = None) -> tuple[dict[str, Any], ...]:
         if item_id is None:
             rows = (
@@ -1419,6 +1471,27 @@ class TaskRepository:
             .fetchone()[0]
         )
 
+    def has_blocking_unresolved(self, task_id: str) -> bool:
+        """IN_FLIGHT items or unfinished duplicate recovery; UNKNOWN items do not block."""
+        return self._has_blocking_unresolved_locked(self._connection(), task_id)
+
+    def _has_blocking_unresolved_locked(
+        self, connection: sqlite3.Connection, task_id: str
+    ) -> bool:
+        return bool(
+            connection.execute(
+                """SELECT EXISTS(
+                     SELECT 1 FROM task_items WHERE task_id = ? AND status = 'in_flight'
+                     UNION ALL
+                     SELECT 1 FROM duplicate_recoveries r JOIN attempts a ON a.id = r.attempt_id
+                       JOIN task_items i ON i.id = a.item_id
+                       WHERE i.task_id = ? AND (r.status IN ('pending','in_flight','unknown')
+                         OR (r.status = 'failed'
+                             AND COALESCE(r.evidence_ref, '') NOT LIKE ? || '%')))""",
+                (task_id, task_id, RECOVERY_NOT_ATTEMPTED),
+            ).fetchone()[0]
+        )
+
     def has_unresolved(self, task_id: str) -> bool:
         return self._has_unresolved_locked(self._connection(), task_id)
 
@@ -1521,20 +1594,18 @@ class TaskRepository:
                     attempt_id=row["attempt_id"],
                     at_utc=now,
                 )
-            unresolved_tasks = connection.execute(
-                """SELECT DISTINCT task_id FROM task_items
-                   WHERE status = 'unknown'"""
-            ).fetchall()
-            for row in unresolved_tasks:
-                connection.execute(
-                    "UPDATE tasks SET state = 'blocked', updated_at_utc = ? WHERE id = ?",
-                    (_iso(now), row["task_id"]),
-                )
-            safe_active_tasks = connection.execute(
-                """SELECT t.id FROM tasks t WHERE t.state IN ('running','pausing')
+            # Recover tasks blocked by the previous UNKNOWN policy when there is work to resume.
+            resumable_tasks = connection.execute(
+                """SELECT t.id FROM tasks t
+                   WHERE (t.state IN ('running','pausing') OR (
+                     t.state = 'blocked'
+                     AND EXISTS (SELECT 1 FROM task_items i WHERE i.task_id = t.id
+                                 AND i.status = 'unknown')
+                     AND EXISTS (SELECT 1 FROM task_items i WHERE i.task_id = t.id
+                                 AND i.status = 'ready')))
                    AND NOT EXISTS (
                      SELECT 1 FROM task_items i WHERE i.task_id = t.id
-                       AND i.status IN ('in_flight','unknown'))
+                       AND i.status = 'in_flight')
                    AND NOT EXISTS (
                      SELECT 1 FROM duplicate_recoveries r
                      JOIN attempts a ON a.id = r.attempt_id
@@ -1542,7 +1613,7 @@ class TaskRepository:
                      WHERE i.task_id = t.id
                        AND r.status IN ('pending','in_flight','failed','unknown'))"""
             ).fetchall()
-            for row in safe_active_tasks:
+            for row in resumable_tasks:
                 connection.execute(
                     "UPDATE tasks SET state = 'paused', updated_at_utc = ? WHERE id = ?",
                     (_iso(now), row["id"]),
@@ -1552,7 +1623,7 @@ class TaskRepository:
                     row["id"],
                     "startup_task_paused",
                     "startup-recovery",
-                    {"reason": "process restarted without an unresolved submission"},
+                    {"reason": "process restarted without a blocking submission or recovery"},
                     at_utc=now,
                 )
             pending_tasks = connection.execute(
@@ -1970,6 +2041,7 @@ def _item_from_row(row: sqlite3.Row) -> QueueItem:
         physical_check_id=row["physical_check_id"],
         source_hash=row["source_hash"],
         created_at_utc=_datetime(row["created_at_utc"]),
+        last_attempt_error=row["last_attempt_error"] if "last_attempt_error" in row.keys() else None,
     )
 
 

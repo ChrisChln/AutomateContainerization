@@ -55,10 +55,43 @@ def app() -> QApplication:
     return instance
 
 
-def test_container_verification_navigates_from_simulated_home(app, tmp_path) -> None:
+@pytest.mark.parametrize("connection_fails", [False, True])
+def test_connect_button_grants_authorization_only_on_success(
+    app, tmp_path, fake_real_pda, monkeypatch, connection_fails
+) -> None:
+    pda = fake_real_pda({"CONTAINER-SYNTHETIC": "SORT-SYNTHETIC"})
     window = MainWindow()
-    controller = AppController(window, data_dir=tmp_path)
+    controller = AppController(window, data_dir=tmp_path, adapter_factory=pda.factory)
+    controller.settings["operator_id"] = "operator-test"
+    errors = []
+    monkeypatch.setattr(controller, "_show_error", errors.append)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_: pytest.fail("Unexpected confirmation"))
+    window.set_devices(controller.device_manager.refresh())
+
+    def fail_to_launch(_package: str) -> None:
+        raise RuntimeError("Synthetic launch failure")
+
+    if connection_fails:
+        monkeypatch.setattr(controller.device_manager, "launch_app", fail_to_launch)
+    try:
+        window.device_connect_button.click()
+        _wait_for(app, lambda: not controller._has_pending_device_jobs())
+
+        assert controller.real_mode_authorized is not connection_fails
+        assert bool(errors) is connection_fails
+        assert not hasattr(window, "device_authorize_check")
+        assert not window.start_button.isEnabled()
+    finally:
+        controller.close()
+        window.close()
+
+
+def test_container_verification_navigates_from_pda_home(app, tmp_path, fake_real_pda) -> None:
+    pda = fake_real_pda({"CONTAINER-SYNTHETIC-001": "SORT-SYNTHETIC"}, initial_page="home")
+    window = MainWindow()
+    controller = AppController(window, data_dir=tmp_path, adapter_factory=pda.factory)
     controller._show_error = lambda message: pytest.fail(message)
+    pda.authorize_and_connect(app, controller)
     config = CarrierConfig(
         carrier_key="CARRIER-SYNTHETIC",
         display_name="Synthetic Carrier",
@@ -78,7 +111,7 @@ def test_container_verification_navigates_from_simulated_home(app, tmp_path) -> 
 
     assert controller.verified_session.container_no == config.container_no
     assert controller.verified_session.sort_code == config.sort_code
-    adapter = controller.adapters[DeviceMode.SIMULATED]
+    adapter = controller.adapters[DeviceMode.REAL]
     assert sum(action[0] == "tap" for action in adapter.actions) >= 3
 
     controller.close()
@@ -101,7 +134,7 @@ def test_changed_carrier_container_revokes_old_physical_evidence(app, tmp_path) 
         updated_at_utc=now,
     )
     controller.repository.save_carrier_configs([original], actor="operator-test")
-    task = _task("task-config-change", TaskState.DRAFT, DeviceMode.SIMULATED)
+    task = _task("task-config-change", TaskState.DRAFT, DeviceMode.REAL)
     item = QueueItem(
         id="item-config-change",
         task_id=task.id,
@@ -145,7 +178,7 @@ def test_changed_carrier_container_revokes_old_physical_evidence(app, tmp_path) 
 def test_blocked_task_without_unresolved_attempts_returns_to_paused(app, tmp_path) -> None:
     window = MainWindow()
     controller = AppController(window, data_dir=tmp_path)
-    task = _task("task-safe-block", TaskState.BLOCKED, DeviceMode.SIMULATED)
+    task = _task("task-safe-block", TaskState.BLOCKED, DeviceMode.REAL)
     controller.repository.create_task(task, [])
     controller.current_task_id = task.id
     controller._last_refreshed_task = None
@@ -160,12 +193,10 @@ def test_blocked_task_without_unresolved_attempts_returns_to_paused(app, tmp_pat
 def test_stopped_real_task_invalidates_authorization_and_device_session(app, tmp_path) -> None:
     window = MainWindow()
     controller = AppController(window, data_dir=tmp_path)
-    controller.set_mode(DeviceMode.REAL)
     task = _task("task-stopped-real", TaskState.STOPPED, DeviceMode.REAL)
     controller.repository.create_task(task, [])
     controller.current_task_id = task.id
     controller.real_mode_authorized = True
-    controller._set_authorization_check(True)
     controller.wms_controller = WmsController(
         FakeDeviceAdapter(),
         warehouse="SYNTHETIC-WAREHOUSE",
@@ -184,7 +215,6 @@ def test_stopped_real_task_invalidates_authorization_and_device_session(app, tmp
     controller._poll()
 
     assert controller.real_mode_authorized is False
-    assert window.device_authorize_check.isChecked() is False
     assert controller.verified_session is None
     assert controller._controller_invalidated is True
     assert controller.wms_controller.real_submission_authorized is False
@@ -199,7 +229,7 @@ def test_cancel_selected_unsubmitted_item_through_main_window(app, tmp_path, mon
     controller = AppController(window, data_dir=tmp_path)
     controller._show_error = lambda message: pytest.fail(message)
     now = datetime.now(UTC)
-    task = _task("task-cancel-unsubmitted", TaskState.DRAFT, DeviceMode.SIMULATED)
+    task = _task("task-cancel-unsubmitted", TaskState.DRAFT, DeviceMode.REAL)
     item = QueueItem(
         id="item-cancel-unsubmitted",
         task_id=task.id,
@@ -236,6 +266,70 @@ def test_cancel_selected_unsubmitted_item_through_main_window(app, tmp_path, mon
     event = controller.repository.events(task_id=task.id, item_id=item.id)[-1]
     assert event["event_type"] == "item_cancelled"
     assert event["actor"] == "local-operator"
+
+    controller.close()
+    window.close()
+
+
+def test_device_job_disables_pda_verify_button_until_finished(app, tmp_path) -> None:
+    import threading
+
+    window = MainWindow()
+    controller = AppController(window, data_dir=tmp_path)
+    release = threading.Event()
+    done: list[object] = []
+
+    controller._run_job(release.wait, done.append, device_job=True)
+
+    assert not window.container_verify_button.isEnabled()
+    assert window.container_verify_button.text() != "PDA 验证"
+    release.set()
+    _wait_for(app, lambda: done and not controller._has_pending_device_jobs())
+    assert window.container_verify_button.isEnabled()
+    assert window.container_verify_button.text() == "PDA 验证"
+
+
+def test_carrier_rows_report_container_verification_result(
+    app, tmp_path, fake_real_pda
+) -> None:
+    pda = fake_real_pda({"CONTAINER-SYNTHETIC-001": "SORT-SYNTHETIC"}, initial_page="home")
+    window = MainWindow()
+    controller = AppController(window, data_dir=tmp_path, adapter_factory=pda.factory)
+    errors: list[str] = []
+    controller._show_error = errors.append
+    pda.authorize_and_connect(app, controller)
+    config = CarrierConfig(
+        carrier_key="CARRIER-SYNTHETIC",
+        display_name="Synthetic Carrier",
+        aliases=(),
+        sort_code="SORT-SYNTHETIC",
+        container_no="CONTAINER-SYNTHETIC-001",
+        enabled=True,
+        version=1,
+        updated_at_utc=datetime.now(UTC),
+    )
+    controller.repository.save_carrier_configs([config], actor="operator-test")
+    window.sort_code_edit.setText(config.sort_code)
+    window.container_edit.setText(config.container_no)
+    assert controller._carrier_rows()[0]["verification"] == "unverified"
+
+    controller._verify_container(config.carrier_key)
+    _wait_for(app, lambda: controller.verified_session is not None)
+    assert window.carrier_table.item(0, 6).text() == "已验证"
+
+    def fail() -> None:
+        raise RuntimeError("synthetic verification failure")
+
+    controller.wms_controller.verify_current_or_open_bag = lambda _config: fail()
+    controller._run_job_original = controller._run_job
+
+    def failing_run_job(operation, on_success, **kwargs):
+        return controller._run_job_original(fail, on_success, **kwargs)
+
+    controller._run_job = failing_run_job
+    controller._verify_container(config.carrier_key)
+    _wait_for(app, lambda: bool(errors))
+    _wait_for(app, lambda: window.carrier_table.item(0, 6).text() == "验证失败")
 
     controller.close()
     window.close()

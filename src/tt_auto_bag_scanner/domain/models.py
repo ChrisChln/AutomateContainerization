@@ -8,15 +8,23 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping
 
+ALREADY_GROUPED_REASON = "重复扫描，已跳过"
+
 
 class PageState(StrEnum):
     LOGIN = "login"
     HOME = "home"
     CONTAINER_MENU = "container_menu"
     SINGLE_EMPTY = "single_empty"
+    # Single-sort page with no bag open but leftover input or an error (e.g. closed bag).
+    SINGLE_OPEN_FAILED = "single_open_failed"
     BAG_READY = "bag_ready"
     SCAN_RESULT = "scan_result"
     DUPLICATE_DIALOG = "duplicate_dialog"
+    # 混合排序: waiting for a tracking number (shows the 扫描的包裹 count).
+    MIXED_EMPTY = "mixed_empty"
+    # 混合排序: tracking accepted; WMS shows its sort code and waits for a bag.
+    MIXED_AWAIT_BAG = "mixed_await_bag"
     UNKNOWN = "unknown"
 
 
@@ -108,6 +116,25 @@ class PageObservation:
     # Tracking number printed inside the exact duplicate dialog body.
     dialog_tracking: str = ""
     duplicate_in_bag: bool = False
+    # An on-screen keyboard overlays the page and can hide result evidence.
+    keyboard_visible: bool = False
+    # Centre of a static label (never the header/Back area); tapping it only hides the keyboard.
+    safe_tap_point: tuple[int, int] | None = None
+    scroll_area: tuple[int, int, int, int] | None = None
+    single_sort_without_dialog: bool = False
+    grouping_dialog_tracking: str = ""
+    grouping_inline_tracking: str = ""
+    # 混合排序 only: the 扫描的包裹 count, the tracking shown under 运单号, and the
+    # tracking named by a 组包中 dialog.
+    mixed_scanned_count: int | None = None
+    mixed_tracking: str = ""
+    mixed_grouping_tracking: str = ""
+    # 混合排序 after closing a 组包中 dialog: inline error, tracking left in the input.
+    mixed_inline_grouping_tracking: str = ""
+    # 混合排序: an inline Logid error (e.g. 出库包裹扫描失败) with a tracking left in the input.
+    mixed_failed_input_text: str = ""
+    # 重新打开这个容器？ (the typed bag is closed): centre of its 取消 button.
+    closed_container_cancel_point: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "visible_labels", MappingProxyType(dict(self.visible_labels)))
@@ -177,6 +204,7 @@ class QueueItem:
     physical_check_id: str | None = None
     source_hash: str = ""
     created_at_utc: datetime | None = None
+    last_attempt_error: str | None = None
 
     def __post_init__(self) -> None:
         if not self.tracking.strip():
@@ -216,6 +244,7 @@ class ScanResult:
     outcome: ScanOutcome
     evidence: ScanEvidence
     recovery_status: str = "not_required"
+    skip_rejected_item: bool = False
 
     def __post_init__(self) -> None:
         if self.outcome is ScanOutcome.SUCCESS:

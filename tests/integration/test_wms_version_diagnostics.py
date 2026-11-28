@@ -37,7 +37,6 @@ def app() -> Iterator[QApplication]:
 def test_container_verification_keeps_detected_wms_version(app: QApplication, tmp_path) -> None:
     window = MainWindow()
     controller = AppController(window, data_dir=tmp_path)
-    controller.set_mode(DeviceMode.REAL)
     controller._device_connected(
         DeviceInfo(serial="SYNTHETIC-DEVICE", app_version="1.1.23 (1001007)")
     )
@@ -99,17 +98,21 @@ def test_diagnostics_distinguish_libusb_setting_from_version_and_session(
     window.close()
 
 
-def test_device_disconnect_clears_cached_wms_version(app: QApplication, tmp_path) -> None:
+def test_device_disconnect_clears_cached_wms_version_and_authorization(
+    app: QApplication, tmp_path
+) -> None:
     window = MainWindow()
     controller = AppController(window, data_dir=tmp_path)
     controller.mode = DeviceMode.REAL
     controller._wms_app_version = "1.1.23 (1001007)"
     controller._connected = True
+    controller.real_mode_authorized = True
 
     controller._devices_refreshed(())
     controller._run_diagnostics()
 
     assert window.diagnostic_labels["wms_version"].text() == "未读取"
+    assert controller.real_mode_authorized is False
 
     controller.close()
     window.close()

@@ -46,6 +46,7 @@ def test_manual_sort_choice_flows_into_saved_import_snapshot(app, tmp_path) -> N
 
     window = MainWindow()
     controller = AppController(window, data_dir=tmp_path / "data")
+    controller.real_mode_authorized = True
     controller._show_error = lambda message: pytest.fail(message)
     now = datetime.now(UTC)
     configs = [
@@ -75,7 +76,6 @@ def test_manual_sort_choice_flows_into_saved_import_snapshot(app, tmp_path) -> N
             "sort_code": "",
             "report_timezone": "America/New_York",
             "threshold_minutes": 30,
-            "threshold_confirmed": True,
             "sort_code_overrides": {2: "SORT-X-B"},
         }
     )
@@ -107,6 +107,7 @@ def test_preview_export_writes_candidates_and_exclusions(app, monkeypatch, tmp_p
 
     window = MainWindow()
     controller = AppController(window, data_dir=tmp_path / "data")
+    controller.real_mode_authorized = True
     controller._show_error = lambda message: pytest.fail(message)
     config = CarrierConfig(
         carrier_key="CARRIER-X",

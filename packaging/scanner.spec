@@ -1,7 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 # ruff: noqa: F821
 
+from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
+from urllib.request import urlopen
+from zipfile import ZipFile
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -20,6 +24,25 @@ hiddenimports += [
 
 datas = [(str(migration_path), "migrations")]
 datas += collect_data_files("tzdata")
+
+# Pin and verify the official Windows x64 release before adding it to the bundle.
+scrcpy_release = "scrcpy-win64-v5.0.1"
+scrcpy_checksum = "b12a2c4ee8be317422451fc7dcf8ee20a71b5ea7ef9ad73ddd825a25316227a5"
+scrcpy_url = f"https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/{scrcpy_release}.zip"
+scrcpy_cache = project_root / "build" / "scrcpy" / f"{scrcpy_release}.zip"
+if scrcpy_cache.is_file():
+    scrcpy_archive = scrcpy_cache.read_bytes()
+else:
+    with urlopen(scrcpy_url, timeout=30) as response:
+        scrcpy_archive = response.read()
+if sha256(scrcpy_archive).hexdigest() != scrcpy_checksum:
+    raise ValueError(f"scrcpy archive failed SHA-256 verification: {scrcpy_cache}")
+if not scrcpy_cache.is_file():
+    scrcpy_cache.parent.mkdir(parents=True, exist_ok=True)
+    scrcpy_cache.write_bytes(scrcpy_archive)
+with ZipFile(BytesIO(scrcpy_archive)) as archive:
+    archive.extractall(scrcpy_cache.parent)
+datas.append((str(scrcpy_cache.parent / scrcpy_release), "tools/scrcpy"))
 
 a = Analysis(
     [str(project_root / "main.py")],

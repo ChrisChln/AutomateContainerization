@@ -13,6 +13,10 @@ class AmbiguousSubmission(DeviceActionError):
     """The one write may have reached WMS, so it must not be retried."""
 
 
+class ScreenOffError(DeviceActionError):
+    """The PDA display is off, so no page can be read."""
+
+
 class UnknownPageError(DeviceActionError):
     """The visible application state did not match a known page."""
 

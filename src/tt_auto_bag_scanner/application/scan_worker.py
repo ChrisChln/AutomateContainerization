@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import random
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from tt_auto_bag_scanner.domain.device import WmsController
 from tt_auto_bag_scanner.domain.models import (
@@ -15,8 +16,16 @@ from tt_auto_bag_scanner.domain.models import (
     VerifiedSession,
 )
 from tt_auto_bag_scanner.domain.rules import can_submit_item
-from tt_auto_bag_scanner.infrastructure.repository import RepositoryError, TaskRepository
+from tt_auto_bag_scanner.infrastructure.exception_handler import UnknownPageError
+from tt_auto_bag_scanner.infrastructure.repository import (
+    RECOVERY_NOT_ATTEMPTED,
+    RepositoryError,
+    TaskRepository,
+)
+from tt_auto_bag_scanner.infrastructure.wms_controller import ScanNotSent, SubmissionBlocked
 
+# Stop after this many UNKNOWN results in a row; the device or page is likely wrong.
+_MAX_CONSECUTIVE_UNKNOWN = 3
 
 class ScanWorker(threading.Thread):
     def __init__(
@@ -27,6 +36,8 @@ class ScanWorker(threading.Thread):
         session_provider: Callable[[QueueItem], VerifiedSession],
         *,
         actor: str = "scanner",
+        scan_interval: tuple[int, int, str] = (5, 30, "none"),
+        priority_item_ids: Iterable[str] = (),
     ) -> None:
         super().__init__(name=f"scan-worker-{task_id}", daemon=False)
         self.repository = repository
@@ -36,14 +47,67 @@ class ScanWorker(threading.Thread):
         self.actor = actor
         self._pause_requested = threading.Event()
         self._stop_requested = threading.Event()
+        self._interval_changed = threading.Condition()
+        self._interval_min, self._interval_max, self._scan_speed = scan_interval
+        self._speed_revision = 0
+        self._priority_lock = threading.Lock()
+        self._priority_item_ids: tuple[str, ...] = tuple(priority_item_ids)
         self.completed = threading.Event()
         self.error: str | None = None
 
     def request_pause(self) -> None:
-        self._pause_requested.set()
+        with self._interval_changed:
+            self._pause_requested.set()
+            self._interval_changed.notify()
 
     def request_stop(self) -> None:
-        self._stop_requested.set()
+        with self._interval_changed:
+            self._stop_requested.set()
+            self._interval_changed.notify()
+
+    def set_priority_items(self, item_ids: Iterable[str]) -> None:
+        """Items visible on the operator's current page are submitted first."""
+        with self._priority_lock:
+            self._priority_item_ids = tuple(item_ids)
+
+    def _next_item(self, visited: set[str]) -> QueueItem | None:
+        remaining = [
+            item for item in self.repository.list_items(self.task_id) if item.id not in visited
+        ]
+        with self._priority_lock:
+            priority = self._priority_item_ids
+        rank = {item_id: index for index, item_id in enumerate(priority)}
+        if not remaining:
+            return None
+        return min(remaining, key=lambda candidate: rank.get(candidate.id, len(rank)))
+
+    def set_scan_speed(self, speed: str) -> None:
+        with self._interval_changed:
+            if speed != self._scan_speed:
+                self._scan_speed = speed
+                self._speed_revision += 1
+                self._interval_changed.notify()
+
+    def _wait_between_items(self) -> None:
+        with self._interval_changed:
+            while not (self._pause_requested.is_set() or self._stop_requested.is_set()):
+                speed = self._scan_speed
+                if speed == "none":
+                    return
+                if speed == "normal":
+                    delay = random.uniform(self._interval_min, self._interval_max)
+                else:
+                    mode = self._interval_min if speed == "fast" else self._interval_max
+                    delay = random.triangular(self._interval_min, self._interval_max, mode)
+                revision = self._speed_revision
+                interrupted = self._interval_changed.wait_for(
+                    lambda: self._pause_requested.is_set()
+                    or self._stop_requested.is_set()
+                    or self._speed_revision != revision,
+                    timeout=delay,
+                )
+                if not interrupted:
+                    return
 
     def run(self) -> None:
         try:
@@ -59,12 +123,16 @@ class ScanWorker(threading.Thread):
         task = self.repository.get_task(self.task_id)
         if task.state is not TaskState.RUNNING:
             raise RepositoryError("worker requires a persisted RUNNING task")
-        if self.repository.has_unresolved(self.task_id):
+        if self.repository.has_blocking_unresolved(self.task_id):
             self._block_task(
-                "unresolved state", "task has UNKNOWN, IN_FLIGHT, or unfinished duplicate recovery"
+                "unresolved state", "task has IN_FLIGHT or unfinished duplicate recovery"
             )
             return
-        for item in self.repository.list_items(self.task_id):
+        consecutive_unknown = 0
+        submitted = False
+        visited: set[str] = set()
+        while (item := self._next_item(visited)) is not None:
+            visited.add(item.id)
             if self._stop_requested.is_set():
                 self._stop_at_boundary()
                 return
@@ -78,11 +146,20 @@ class ScanWorker(threading.Thread):
                 ItemStatus.CANCELLED,
             }:
                 continue
-            if item.status is ItemStatus.WAIT_PHYSICAL:
+            if item.status in {ItemStatus.WAIT_PHYSICAL, ItemStatus.UNKNOWN}:
+                # UNKNOWN stays for later reconciliation and is never retried.
                 continue
             if item.status is not ItemStatus.READY:
                 self._block_task("unsafe item state", f"item {item.id} is {item.status.value}")
                 return
+            if submitted:
+                self._wait_between_items()
+                if self._stop_requested.is_set():
+                    self._stop_at_boundary()
+                    return
+                if self._pause_requested.is_set():
+                    self._pause_at_boundary()
+                    return
             try:
                 current_item = self.repository.get_item(item.id)
                 physical_check = self.repository.get_physical_check(item.id)
@@ -121,6 +198,11 @@ class ScanWorker(threading.Thread):
                 if result.attempt_id != attempt_id:
                     raise RepositoryError("controller result does not match the persisted attempt")
                 self.repository.finish_attempt(attempt_id, result, actor=self.actor)
+                submitted = True
+            except ScanNotSent as exc:
+                self.repository.mark_attempt_not_sent(attempt_id, str(exc), actor=self.actor)
+                self._pause_at_boundary(f"扫描框核验失败，运单未发送：{exc}")
+                return
             except Exception as exc:
                 try:
                     self.repository.mark_attempt_unknown(
@@ -135,9 +217,20 @@ class ScanWorker(threading.Thread):
             if result.outcome is ScanOutcome.ALREADY_IN_BAG:
                 if not self._recover_duplicate(result, session):
                     return
-            elif result.outcome is not ScanOutcome.SUCCESS:
+            elif result.outcome is ScanOutcome.UNKNOWN:
+                # Owner decision: UNKNOWN is left for later review; the next item
+                # re-verifies the bag first. Repeated UNKNOWN means something is wrong.
+                consecutive_unknown += 1
+                if consecutive_unknown >= _MAX_CONSECUTIVE_UNKNOWN:
+                    self._block_task("scan result needs review", "repeated unknown results")
+                    return
+                continue
+            elif result.outcome is not ScanOutcome.SUCCESS and not (
+                result.outcome is ScanOutcome.REJECTED and result.skip_rejected_item
+            ):
                 self._block_task("scan result needs review", result.outcome.value)
                 return
+            consecutive_unknown = 0
 
             if self._stop_requested.is_set():
                 self._stop_at_boundary()
@@ -168,7 +261,30 @@ class ScanWorker(threading.Thread):
     def _recover_duplicate(self, result, session: VerifiedSession) -> bool:
         try:
             self.repository.begin_recovery(result.attempt_id, actor=self.actor)
-            recovery = self.controller.recover_duplicate(result, session)
+            try:
+                recovery = self.controller.recover_duplicate(result, session)
+            except (SubmissionBlocked, UnknownPageError) as refused:
+                # Refused before anything was typed: WMS already confirmed the item is
+                # in the bag. Record why, drop the session, and let the next item re-verify.
+                self.repository.record_recovery(
+                    RecoveryResult(
+                        attempt_id=result.attempt_id,
+                        tracking=result.tracking,
+                        container_no=session.container_no,
+                        recovered=False,
+                        observed_at_utc=result.evidence.observed_at_utc,
+                        logid=result.evidence.logid,
+                        evidence_ref=(
+                            f"{RECOVERY_NOT_ATTEMPTED} {type(refused).__name__}: {refused}"
+                        ),
+                    ),
+                    actor=self.actor,
+                    abandoned=True,
+                )
+                abandon = getattr(self.controller, "abandon_duplicate_recovery", None)
+                if abandon is not None:
+                    abandon()
+                return True
             if not isinstance(recovery, RecoveryResult):
                 raise RepositoryError("duplicate recovery returned an invalid result")
             if recovery.attempt_id != result.attempt_id:
@@ -182,7 +298,7 @@ class ScanWorker(threading.Thread):
                 recovered=False,
                 observed_at_utc=result.evidence.observed_at_utc,
                 logid=result.evidence.logid,
-                evidence_ref=f"recovery failed: {type(exc).__name__}",
+                evidence_ref=f"recovery failed: {type(exc).__name__}: {exc}",
             )
             try:
                 self.repository.record_recovery(recovery, actor=self.actor)

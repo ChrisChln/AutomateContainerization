@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from tt_auto_bag_scanner.domain.models import DeviceInfo, InputField, XmlSnapshot
-from tt_auto_bag_scanner.infrastructure.exception_handler import DeviceActionError
+from tt_auto_bag_scanner.infrastructure.exception_handler import (
+    DeviceActionError,
+    ScreenOffError,
+)
 
 
 class AdbDeviceAdapter:
@@ -125,6 +128,12 @@ class AdbDeviceAdapter:
     def snapshot_xml(self) -> XmlSnapshot:
         device = self._require_device()
         try:
+            screen_on = dict(getattr(device, "info", None) or {}).get("screenOn")
+        except Exception:
+            screen_on = None
+        if screen_on is False:
+            raise ScreenOffError("PDA 屏幕已关闭，请唤醒并解锁后重试")
+        try:
             xml = device.dump_hierarchy(compressed=False)
             current = device.app_current()
         except Exception as exc:
@@ -155,6 +164,18 @@ class AdbDeviceAdapter:
             self._require_device().send_keys(text, clear=True)
         except Exception as exc:
             raise DeviceActionError("device text entry failed") from exc
+
+    def swipe(self, x1: int, y1: int, x2: int, y2: int) -> None:
+        try:
+            self._require_device().swipe(x1, y1, x2, y2, 0.3)
+        except Exception as exc:
+            raise DeviceActionError("device swipe failed") from exc
+
+    def clear_text(self) -> None:
+        try:
+            self._require_device().clear_text()
+        except Exception as exc:
+            raise DeviceActionError("device text clear failed") from exc
 
     def press_key(self, key: str) -> None:
         key_map = {"ENTER": "enter", "BACK": "back"}

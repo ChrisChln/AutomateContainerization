@@ -1,4 +1,4 @@
-"""Wire the desktop UI to isolated simulator/real services."""
+"""Wire the desktop UI to the real PDA services."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import math
 import os
 import shutil
+import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -13,7 +14,7 @@ from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QThread, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from tt_auto_bag_scanner.application.import_service import (
@@ -23,13 +24,16 @@ from tt_auto_bag_scanner.application.import_service import (
 )
 from tt_auto_bag_scanner.application.startup_recovery import recover_on_startup
 from tt_auto_bag_scanner.application.task_service import TaskService
+from tt_auto_bag_scanner.domain.device import DeviceAdapter
 from tt_auto_bag_scanner.domain.models import (
+    ALREADY_GROUPED_REASON,
     CarrierConfig,
     DeviceInfo,
     DeviceMode,
     ImportMapping,
     ItemStatus,
     QueueItem,
+    ScanOutcome,
     TaskCounts,
     TaskSnapshot,
     TaskState,
@@ -43,14 +47,19 @@ from tt_auto_bag_scanner.infrastructure.carrier_config import (
 from tt_auto_bag_scanner.infrastructure.device_manager import DeviceManager
 from tt_auto_bag_scanner.infrastructure.excel_parser import ExcelParser, WorkbookValidationError
 from tt_auto_bag_scanner.infrastructure.exporter import ReportExporter
-from tt_auto_bag_scanner.infrastructure.fake_device import FakeDeviceAdapter
 from tt_auto_bag_scanner.infrastructure.paths import ensure_app_data_dir
 from tt_auto_bag_scanner.infrastructure.physical_check_service import PhysicalCheckService
 from tt_auto_bag_scanner.infrastructure.repository import RepositoryError, TaskRepository
-from tt_auto_bag_scanner.infrastructure.wms_controller import WmsController
-from tt_auto_bag_scanner.ui.main_window import MainWindow
+from tt_auto_bag_scanner.infrastructure.wms_controller import (
+    MixedSortController,
+    WmsController,
+)
+from tt_auto_bag_scanner.ui.main_window import (
+    DEFAULT_REPORT_TIMEZONE,
+    SCAN_SPEED_LABELS,
+    MainWindow,
+)
 
-SIMULATED_WAREHOUSE = "SIMULATED-WAREHOUSE"
 WMS_PACKAGE = "com.ss.android.pda"
 
 
@@ -67,8 +76,10 @@ class OperationJob(QThread):
         import_job: bool = False,
         device_job: bool = False,
         cleanup: Callable[[], None] | None = None,
+        on_failure: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(parent)
+        self.on_failure = on_failure
         self.operation = operation
         self.on_success = on_success
         self.is_import_job = import_job
@@ -103,25 +114,27 @@ class AppController(QObject):
         *,
         data_dir: str | Path | None = None,
         poll_interval_ms: int = 400,
+        adapter_factory: Callable[[str], DeviceAdapter] | None = None,
     ) -> None:
         super().__init__(window)
+        self._preview = QProcess(self)
+        self._preview.setStandardOutputFile(QProcess.nullDevice())
+        self._preview.setStandardErrorFile(QProcess.nullDevice())
+        self._preview.errorOccurred.connect(self._preview_error)
+        self._preview.finished.connect(self._preview_finished)
         self.window = window
         self.data_dir = Path(data_dir).resolve() if data_dir is not None else ensure_app_data_dir()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.settings_file = self.data_dir / "settings.json"
         self.settings = self._load_settings()
         self.real_mode_authorized = False
-        self.mode = DeviceMode.SIMULATED
+        self.mode = DeviceMode.REAL
+        self._adapter_factory = adapter_factory or self._new_adb_adapter
         self.repositories = {
-            mode: TaskRepository(self.data_dir / filename)
-            for mode, filename in (
-                (DeviceMode.SIMULATED, "simulated.sqlite3"),
-                (DeviceMode.REAL, "real.sqlite3"),
-            )
+            DeviceMode.REAL: TaskRepository(self.data_dir / "real.sqlite3"),
         }
         self.task_services = {
-            mode: TaskService(self.repositories[mode], actor=self._actor)
-            for mode in DeviceMode
+            DeviceMode.REAL: TaskService(self.repositories[DeviceMode.REAL], actor=self._actor),
         }
         for repository in self.repositories.values():
             recover_on_startup(repository)
@@ -131,10 +144,9 @@ class AppController(QObject):
         self.carrier_service = CarrierConfigService()
         self.physical_check_service = PhysicalCheckService()
         self.exporter = ReportExporter()
-        self.adapters: dict[DeviceMode, FakeDeviceAdapter | AdbDeviceAdapter] = {}
+        self.adapters: dict[DeviceMode, DeviceAdapter] = {}
         self.device_managers: dict[DeviceMode, DeviceManager] = {}
-        self._make_mode_components(DeviceMode.SIMULATED)
-        self._make_mode_components(DeviceMode.REAL)
+        self._make_device_components()
 
         self.current_task_id: str | None = None
         self.current_preview: ImportPreview | None = None
@@ -142,11 +154,15 @@ class AppController(QObject):
         self.selected_history_task_id: str | None = None
         self.wms_controller: WmsController | None = None
         self.verified_session: VerifiedSession | None = None
+        self._failed_container_checks: set[tuple[str, str, str]] = set()
         self._controller_invalidated = False
         self._connected = False
         self._wms_app_version = ""
         self._jobs: set[OperationJob] = set()
-        self._last_refreshed_task: tuple[DeviceMode, str | None, datetime | None] | None = None
+        # (mode, task id, task updated_at, item status counts): items finish mid-run
+        # without a task transition, so the counts keep the progress live.
+        self._last_refreshed_task: tuple[object, ...] | None = None
+        self._last_activity_revision: tuple[str, int | None, int | None] | None = None
         self._history_filters: dict[str, str] = {
             "query": "",
             "state": "",
@@ -158,13 +174,14 @@ class AppController(QObject):
         self.window.set_timezones(sorted(available_timezones()))
         self.window.apply_import_defaults(self._import_defaults())
         self._connect_window()
-        self.window.set_mode(DeviceMode.SIMULATED)
         self._select_latest_task()
         self._refresh_visible_data(force=True)
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(max(150, poll_interval_ms))
         self._poll_timer.timeout.connect(self._poll)
         self._poll_timer.start()
+        if self.settings.get("auto_connect_device") is True:
+            QTimer.singleShot(0, self._auto_connect_device)
 
     @property
     def repository(self) -> TaskRepository:
@@ -175,7 +192,7 @@ class AppController(QObject):
         return self.task_services[self.mode]
 
     @property
-    def adapter(self) -> FakeDeviceAdapter | AdbDeviceAdapter:
+    def adapter(self) -> DeviceAdapter:
         return self.adapters[self.mode]
 
     @property
@@ -228,73 +245,45 @@ class AppController(QObject):
         if "minimum_age_minutes" in self.settings:
             self.window.threshold_spin.setValue(float(self.settings["minimum_age_minutes"]))
 
-    def _make_mode_components(self, mode: DeviceMode) -> None:
-        if mode is DeviceMode.SIMULATED:
-            fake_serial = "SIMULATED-PDA"
-            adapter = self._make_simulator_adapter()
-            if not adapter.devices:
-                adapter.devices = (
-                    DeviceInfo(
-                        serial=fake_serial,
-                        model="模拟 PDA",
-                        state="device",
-                        authorized=True,
-                    ),
-                )
-            manager = DeviceManager(adapter)
-            manager.refresh()
-            manager.connect(fake_serial)
-            self.adapters[mode] = adapter
-            self.device_managers[mode] = manager
-            return
-        adb_path = str(self.settings.get("adb_path") or shutil.which("adb") or "adb")
-        adapter = AdbDeviceAdapter(package_name=WMS_PACKAGE, adb_path=adb_path)
-        self.adapters[mode] = adapter
-        self.device_managers[mode] = DeviceManager(adapter)
+    def _new_adb_adapter(self, adb_path: str) -> DeviceAdapter:
+        return AdbDeviceAdapter(package_name=WMS_PACKAGE, adb_path=adb_path)
 
-    def _make_simulator_adapter(
-        self,
-        *,
-        configs: Sequence[CarrierConfig] | None = None,
-        items: Sequence[QueueItem] | None = None,
-    ) -> FakeDeviceAdapter:
-        selected = tuple(
-            configs
-            if configs is not None
-            else self.repositories[DeviceMode.SIMULATED].list_carrier_configs()
-        )
-        container_sort: dict[str, str] = {}
-        for config in selected:
-            container_sort[config.container_no] = config.sort_code
-        if items:
-            for item in items:
-                container_sort[item.container_no] = item.sort_code
-        serial = DeviceInfo(
-            serial="SIMULATED-PDA",
-            model="模拟 PDA",
-            state="device",
-            authorized=True,
-        )
-        warehouse = str(self.settings.get("warehouse") or SIMULATED_WAREHOUSE)
-        options: dict[str, object] = {
-            "devices": (serial,),
-            "package_name": WMS_PACKAGE,
-            "warehouse": warehouse if container_sort else None,
-        }
-        if container_sort:
-            options["container_sort_map"] = container_sort
-        return FakeDeviceAdapter(**options)
+    def _find_local_adb(self) -> str | None:
+        on_path = shutil.which("adb")
+        if on_path:
+            return on_path
+        sdk_roots = [Path(value) for name in ("ANDROID_HOME", "ANDROID_SDK_ROOT")
+                     if (value := os.environ.get(name))]
+        if local_app_data := os.environ.get("LOCALAPPDATA"):
+            sdk_roots.append(Path(local_app_data) / "Android" / "Sdk")
+        candidates = [root / "platform-tools" / "adb.exe" for root in sdk_roots]
+        candidates.append(self.data_dir / "platform-tools" / "adb.exe")
+        if getattr(sys, "frozen", False):
+            candidates.append(Path(sys.executable).parent / "platform-tools" / "adb.exe")
+        return next((str(path.resolve()) for path in candidates if path.is_file()), None)
+
+    def _make_device_components(self) -> None:
+        configured_path = str(self.settings.get("adb_path") or "").strip()
+        detected_path = None if configured_path else self._find_local_adb()
+        self._adb_path = configured_path or detected_path or "adb"
+        self.window.adb_path_edit.setPlaceholderText(detected_path or "未找到 ADB")
+        adapter = self._adapter_factory(self._adb_path)
+        self.adapters[DeviceMode.REAL] = adapter
+        self.device_managers[DeviceMode.REAL] = DeviceManager(adapter)
 
     def _new_wms_controller(
         self,
-        adapter: FakeDeviceAdapter | AdbDeviceAdapter,
+        adapter: DeviceAdapter,
         *,
         warehouse: str,
         real_submission_authorized: bool = False,
     ) -> WmsController:
         timeout = float(self.settings.get("response_timeout_seconds", 15))
         interval = 0.2
-        return WmsController(
+        controller_class = (
+            MixedSortController if self.settings.get("sort_mode") == "mixed" else WmsController
+        )
+        return controller_class(
             adapter,
             warehouse=warehouse,
             real_submission_authorized=real_submission_authorized,
@@ -305,8 +294,12 @@ class AppController(QObject):
 
     def _connect_window(self) -> None:
         window = self.window
+        window.timezone_combo.currentIndexChanged.connect(
+            lambda: self._refresh_visible_data(force=True)
+        )
         window.open_report_requested.connect(self._choose_report)
         window.preview_requested.connect(self._build_preview)
+        window.clear_task_requested.connect(self._clear_task)
         window.preview_export_requested.connect(self._export_preview)
         window.sort_code_overrides_requested.connect(self._rebuild_preview_with_sort_overrides)
         window.review_task_requested.connect(self._review_task)
@@ -314,14 +307,15 @@ class AppController(QObject):
         window.excluded_rows_requested.connect(lambda: None)
         window.device_refresh_requested.connect(self._refresh_devices)
         window.device_connect_requested.connect(self._connect_device)
-        window.mode_change_requested.connect(self.set_mode)
-        window.real_mode_authorization_requested.connect(self._authorize_real_mode)
         window.physical_check_requested.connect(self._record_physical_check)
         window.cancel_item_requested.connect(self._cancel_unsubmitted_item)
         window.carrier_save_requested.connect(self._save_carrier_config)
         window.container_verify_requested.connect(self._verify_container)
         window.import_source_changed.connect(self._reload_report_headers)
         window.settings_save_requested.connect(self._save_window_settings)
+        window.scan_speed_requested.connect(self._set_scan_speed)
+        window.sort_mode_requested.connect(self._set_sort_mode)
+        window.visible_queue_items_changed.connect(self._set_priority_items)
         window.backup_requested.connect(self._backup_database)
         window.restore_requested.connect(self._restore_database)
         window.adb_path_browse_requested.connect(self._choose_adb_path)
@@ -333,6 +327,7 @@ class AppController(QObject):
         window.history_filter_requested.connect(self._filter_history)
         window.history_task_selected.connect(self._select_history_task)
         window.technical_log_requested.connect(self._show_technical_log)
+        window.workspace_confirmation_requested.connect(self._confirm_workspace_result)
         window.reconciliation_requested.connect(self._open_reconciliation)
 
     def _set_status(self, message: str) -> None:
@@ -350,6 +345,7 @@ class AppController(QObject):
         import_job: bool = False,
         device_job: bool = False,
         cleanup: Callable[[], None] | None = None,
+        on_failure: Callable[[], None] | None = None,
     ) -> None:
         job = OperationJob(
             operation,
@@ -358,6 +354,7 @@ class AppController(QObject):
             import_job=import_job,
             device_job=device_job,
             cleanup=cleanup,
+            on_failure=on_failure,
         )
         self._jobs.add(job)
         job.succeeded.connect(self._job_succeeded)
@@ -377,6 +374,8 @@ class AppController(QObject):
         job = self.sender()
         if isinstance(job, OperationJob) and job.is_import_job:
             self.window.set_import_busy(False)
+        if isinstance(job, OperationJob) and job.on_failure is not None:
+            job.on_failure()
         self._show_error(message)
         self._refresh_gates()
 
@@ -399,83 +398,12 @@ class AppController(QObject):
             if job.is_device_job and not self._has_pending_device_jobs():
                 self.window.set_device_busy(False)
 
-    def set_mode(self, requested: DeviceMode | str) -> None:
-        mode = requested if isinstance(requested, DeviceMode) else DeviceMode(str(requested))
-        if mode is self.mode:
-            return
-        if self._has_active_worker():
-            self._set_status("扫描运行中，暂停或停止后再切换模式")
-            self.window.set_mode(self.mode)
-            return
-        if self._has_pending_device_jobs():
-            self._set_status("设备操作进行中，完成后再切换模式")
-            self.window.set_mode(self.mode)
-            return
-        previous_controller = self.wms_controller
-        if previous_controller is not None:
-            previous_controller.real_submission_authorized = False
-            previous_controller.invalidate_session()
-        self.mode = mode
-        self.real_mode_authorized = False
-        self._wms_app_version = ""
-        self.wms_controller = None
-        self.verified_session = None
-        self._controller_invalidated = False
-        self._connected = mode is DeviceMode.SIMULATED
-        self.window.set_mode(mode)
-        self.window.device_authorize_check.blockSignals(True)
-        self.window.device_authorize_check.setChecked(self.real_mode_authorized)
-        self.window.device_authorize_check.blockSignals(False)
-        self._select_latest_task()
-        self._last_refreshed_task = None
-        self._history_rows_cache = None
-        self._refresh_visible_data(force=True)
-
     def _has_active_worker(self) -> bool:
         return any(
             service.active_worker(task.id) is not None
             for mode, service in self.task_services.items()
             for task in self.repositories[mode].list_tasks()
         )
-
-    def _authorize_real_mode(self, requested: bool) -> None:
-        if self._has_pending_device_jobs():
-            self._set_authorization_check(self.real_mode_authorized)
-            self._show_error("设备操作进行中，暂不能更改实机授权")
-            return
-        if not requested:
-            self.real_mode_authorized = False
-            if self.wms_controller is not None:
-                self.wms_controller.real_submission_authorized = False
-            if self.current_task_id and self.task_service.active_worker(self.current_task_id):
-                self.task_service.stop_task(self.current_task_id)
-            self._refresh_gates()
-            return
-        if self.mode is not DeviceMode.REAL:
-            self._set_authorization_check(False)
-            self._show_error("切换到实机模式后再授权")
-            return
-        if not str(self.settings.get("operator_id", "")).strip():
-            self._set_authorization_check(False)
-            self._show_error("请先填写操作员 ID")
-            return
-        answer = QMessageBox.question(
-            self.window,
-            "实机授权",
-            "确认本站已获实机作业授权？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        self.real_mode_authorized = answer == QMessageBox.StandardButton.Yes
-        self._set_authorization_check(self.real_mode_authorized)
-        if self.wms_controller is not None:
-            self.wms_controller.real_submission_authorized = self.real_mode_authorized
-        self._refresh_gates()
-
-    def _set_authorization_check(self, checked: bool) -> None:
-        self.window.device_authorize_check.blockSignals(True)
-        self.window.device_authorize_check.setChecked(checked)
-        self.window.device_authorize_check.blockSignals(False)
 
     def _save_window_settings(self, incoming: Mapping[str, object]) -> None:
         if self._reject_pending_device_job("修改设置"):
@@ -487,6 +415,11 @@ class AppController(QObject):
         values.pop("real_mode_authorized", None)
         values.pop("mode", None)
         values.pop("minimum_age_confirmed", None)
+        minimum = int(values.get("scan_interval_min_seconds", 5))
+        maximum = int(values.get("scan_interval_max_seconds", 30))
+        if minimum > maximum:
+            self._show_error("最短扫描间隔不能超过最长扫描间隔")
+            return
         warehouse_changed = values.get("warehouse") != self.settings.get("warehouse")
         adb_changed = values.get("adb_path") != self.settings.get("adb_path")
         timeout_changed = (
@@ -496,12 +429,10 @@ class AppController(QObject):
         self.settings.update(values)
         self._write_settings()
         if adb_changed:
-            self._make_mode_components(DeviceMode.REAL)
-            if self.mode is DeviceMode.REAL:
-                self._connected = False
-        if warehouse_changed and self.mode is DeviceMode.SIMULATED:
-            self._make_mode_components(DeviceMode.SIMULATED)
-        if warehouse_changed or timeout_changed or (adb_changed and self.mode is DeviceMode.REAL):
+            self._make_device_components()
+            self._connected = False
+            self.real_mode_authorized = False
+        if warehouse_changed or timeout_changed or adb_changed:
             self.wms_controller = None
             self.verified_session = None
             self._controller_invalidated = True
@@ -512,9 +443,56 @@ class AppController(QObject):
         self.window.threshold_spin.setValue(
             float(self.settings.get("minimum_age_minutes", self.window.threshold_spin.value()))
         )
-        self.window.confirm_threshold_check.setChecked(False)
         self._set_status("设置已保存")
         self._refresh_gates()
+
+    def _set_sort_mode(self, mode: str) -> None:
+        previous = str(self.settings.get("sort_mode", "single"))
+        if mode not in ("single", "mixed") or mode == previous:
+            self.window.set_sort_mode(previous)
+            return
+        if self._reject_pending_device_job("切换排序模式") or self._has_active_worker():
+            if self._has_active_worker():
+                self._show_error("扫描运行中不能切换排序模式")
+            self.window.set_sort_mode(previous)
+            return
+        self.settings["sort_mode"] = mode
+        try:
+            self._write_settings()
+        except OSError as exc:
+            self.settings["sort_mode"] = previous
+            self.window.set_sort_mode(previous)
+            self._show_error(f"排序模式保存失败：{exc}")
+            return
+        self.wms_controller = None
+        self.verified_session = None
+        self._controller_invalidated = True
+        self.window.set_device_status(connected=self._connected, session_verified=False)
+        self.window.set_sort_mode(mode)
+
+    def _set_priority_items(self, item_ids: list[str]) -> None:
+        if self.current_task_id is not None:
+            worker = self.task_service.active_worker(self.current_task_id)
+            if worker is not None:
+                worker.set_priority_items(item_ids)
+
+    def _set_scan_speed(self, speed: str) -> None:
+        if speed not in SCAN_SPEED_LABELS:
+            return
+        previous = self.settings.get("scan_speed", "normal")
+        self.settings["scan_speed"] = speed
+        try:
+            self._write_settings()
+        except OSError as exc:
+            self.settings["scan_speed"] = previous
+            self.window.set_scan_speed(str(previous))
+            self._show_error(f"扫描速度保存失败：{exc}")
+            return
+        self.window.set_scan_speed(speed)
+        if self.current_task_id is not None:
+            worker = self.task_service.active_worker(self.current_task_id)
+            if worker is not None:
+                worker.set_scan_speed(speed)
 
     def _choose_adb_path(self) -> None:
         if self._reject_pending_device_job("更改 ADB 路径"):
@@ -530,21 +508,6 @@ class AppController(QObject):
         if self._has_active_worker():
             self._show_error("扫描运行中不能刷新设备")
             return
-        if self.mode is DeviceMode.SIMULATED:
-            devices = self.device_manager.refresh()
-            self.window.set_devices(devices)
-            self._connected = self.device_manager.connection_state.value == "connected"
-            self.window.set_device_status(
-                connected=self._connected,
-                app_version="模拟 WMS",
-                session_verified=self._verified_session_valid(),
-                warehouse=self.verified_session.warehouse if self.verified_session else "",
-                container_no=(
-                    self.verified_session.container_no if self.verified_session else ""
-                ),
-            )
-            self._refresh_gates()
-            return
         self._run_job(self.device_manager.refresh, self._devices_refreshed, device_job=True)
 
     def _devices_refreshed(self, result: object) -> None:
@@ -552,13 +515,33 @@ class AppController(QObject):
         self.window.set_devices(devices)
         self._connected = self.device_manager.connection_state.value == "connected"
         if not self._connected:
+            self.real_mode_authorized = False
             self._wms_app_version = ""
             self.verified_session = None
             if self.wms_controller is not None:
+                self.wms_controller.real_submission_authorized = False
                 self.wms_controller.invalidate_session()
             self.window.set_device_status(connected=False, session_verified=False)
         self._set_status(f"发现 {len(devices)} 台设备")
         self._refresh_gates()
+
+    def _auto_connect_device(self) -> None:
+        if self._connected or self._has_active_worker():
+            return
+        self._run_job(self.device_manager.refresh, self._auto_connect_refreshed, device_job=True)
+
+    def _auto_connect_refreshed(self, result: object) -> None:
+        self._devices_refreshed(result)
+        serials = [device.serial for device in tuple(result)]  # type: ignore[arg-type]
+        saved = str(self.settings.get("last_device_serial") or "")
+        serial = saved if saved in serials else (serials[0] if len(serials) == 1 else "")
+        if not serial:
+            self._set_status("自动连接：未找到唯一设备")
+            return
+        index = self.window.device_combo.findData(serial)
+        if index >= 0:
+            self.window.device_combo.setCurrentIndex(index)
+        QTimer.singleShot(0, lambda: self._connect_device(serial))
 
     def _connect_device(self, serial: str) -> None:
         if self._reject_pending_device_job("连接设备"):
@@ -569,6 +552,17 @@ class AppController(QObject):
         if not serial.strip():
             self._show_error("请选择设备")
             return
+        if not str(self.settings.get("operator_id", "")).strip():
+            self._show_error("请先填写并保存操作员 ID")
+            return
+
+        self._connected = False
+        self.real_mode_authorized = False
+        self._wms_app_version = ""
+        self.wms_controller = None
+        self.verified_session = None
+        self.window.set_device_status(connected=False, session_verified=False)
+        self._refresh_gates()
 
         def connect() -> DeviceInfo:
             device = self.device_manager.connect(serial)
@@ -577,8 +571,12 @@ class AppController(QObject):
 
         self._run_job(connect, self._device_connected, device_job=True)
 
-    def _device_connected(self, result: object) -> None:
+    def _device_connected(self, result: DeviceInfo) -> None:
         self._connected = True
+        if self.settings.get("last_device_serial") != result.serial:
+            self.settings["last_device_serial"] = result.serial
+            self._write_settings()
+        self.real_mode_authorized = True
         self._wms_app_version = str(getattr(result, "app_version", "") or "").strip()
         self.wms_controller = None
         self.verified_session = None
@@ -590,6 +588,37 @@ class AppController(QObject):
         )
         self._set_status("请在 PDA 手动登录")
         self._refresh_gates()
+        self._open_device_preview(result.serial)
+
+    def _open_device_preview(self, serial: str) -> None:
+        self._stop_device_preview()
+        search_roots = [self.data_dir]
+        if bundle_dir := getattr(sys, "_MEIPASS", None):
+            search_roots.insert(0, Path(bundle_dir))
+        candidates = (root / "tools" / "scrcpy" / "scrcpy.exe" for root in search_roots)
+        executable = next((str(path) for path in candidates if path.is_file()), None)
+        executable = executable or shutil.which("scrcpy")
+        if not executable:
+            self._set_status("未找到 scrcpy · 请在 PDA 手动登录")
+            return
+
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert("ADB", shutil.which(self._adb_path) or self._adb_path)
+        self._preview.setProcessEnvironment(environment)
+        self._preview.start(executable, ["--serial", serial, "--no-control", "--no-audio"])
+
+    def _preview_error(self, error: QProcess.ProcessError) -> None:
+        if error == QProcess.ProcessError.FailedToStart:
+            self._set_status("投屏启动失败 · 请在 PDA 手动登录")
+
+    def _preview_finished(self, exit_code: int, exit_status: QProcess.ExitStatus) -> None:
+        if exit_status == QProcess.ExitStatus.NormalExit and exit_code != 0:
+            self._set_status("投屏失败 · 请在 PDA 手动操作")
+
+    def _stop_device_preview(self) -> None:
+        if self._preview.state() != QProcess.ProcessState.NotRunning:
+            self._preview.kill()
+            self._preview.waitForFinished(1000)
 
     def _choose_report(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -732,8 +761,6 @@ class AppController(QObject):
                     ).items()
                 },
             )
-            if not bool(request.get("threshold_confirmed")):
-                raise ValueError("请确认筛选阈值")
             if not mapping.report_timezone:
                 raise ValueError("请选择报表时区")
             if not path or not mapping.sheet_name:
@@ -743,7 +770,7 @@ class AppController(QObject):
             return
         task_id = str(uuid4())
         mode = self.mode
-        if mode is DeviceMode.REAL and not self.real_mode_authorized:
+        if not self.real_mode_authorized:
             self._show_error("生成实机任务前必须完成实机授权")
             return
         self._save_import_defaults(mapping)
@@ -976,12 +1003,6 @@ class AppController(QObject):
                 actor=self._actor,
                 reason="operator reviewed the verified queue",
             )
-        if self.mode is DeviceMode.SIMULATED and items:
-            try:
-                self._prepare_simulated_session(items[0], items)
-            except Exception as exc:
-                self._show_error(f"模拟预检失败：{exc}")
-                return
         self.window.navigate_to("扫描工作区")
         self._refresh_visible_data()
 
@@ -1020,26 +1041,6 @@ class AppController(QObject):
         if waiting:
             self._set_status(f"{len(waiting)} 项已授权跳过实物核验")
         return True
-
-    def _prepare_simulated_session(
-        self, item: QueueItem, items: Sequence[QueueItem]
-    ) -> VerifiedSession:
-        adapter = self._make_simulator_adapter(items=items)
-        self.adapters[DeviceMode.SIMULATED] = adapter
-        manager = DeviceManager(adapter)
-        manager.refresh()
-        manager.connect("SIMULATED-PDA")
-        self.device_managers[DeviceMode.SIMULATED] = manager
-        controller = self._new_wms_controller(
-            adapter,
-            warehouse=str(self.settings.get("warehouse") or SIMULATED_WAREHOUSE),
-        )
-        session = controller.open_bag(self._config_for_item(item))
-        self.wms_controller = controller
-        self.verified_session = session
-        self._connected = True
-        self._controller_invalidated = False
-        return session
 
     def _save_carrier_config(self, data: Mapping[str, object]) -> None:
         if self._reject_pending_device_job("修改容器配置"):
@@ -1089,8 +1090,6 @@ class AppController(QObject):
         self.window.set_carrier_rows(self._carrier_rows())
         self._controller_invalidated = True
         self.verified_session = None
-        if self.mode is DeviceMode.SIMULATED:
-            self._make_mode_components(DeviceMode.SIMULATED)
         self._set_status("承运商配置已保存")
         self._refresh_gates()
 
@@ -1125,6 +1124,7 @@ class AppController(QObject):
                 "sort_code": item.sort_code,
                 "container_no": item.container_no,
                 "enabled": item.enabled,
+                "verification": self._container_verification(item),
             }
             for item in self.repository.list_carrier_configs()
         )
@@ -1142,13 +1142,43 @@ class AppController(QObject):
         )
         return configured + pending
 
+    @staticmethod
+    def _container_check_key(config: CarrierConfig) -> tuple[str, str, str]:
+        return (config.carrier_key.casefold(), config.sort_code, config.container_no)
+
+    def _container_verification(self, config: CarrierConfig) -> str:
+        session = self.verified_session
+        if (
+            session is not None
+            and session.valid
+            and session.sort_code == config.sort_code
+            and session.container_no == config.container_no
+        ):
+            return "verified"
+        if self._container_check_key(config) in self._failed_container_checks:
+            return "failed"
+        return "unverified"
+
+    def _container_check_failed(self, config: CarrierConfig) -> None:
+        self._failed_container_checks.add(self._container_check_key(config))
+        session = self.verified_session
+        if (
+            session is not None
+            and session.sort_code == config.sort_code
+            and session.container_no == config.container_no
+        ):
+            self.verified_session = None
+        self.window.set_carrier_rows(self._carrier_rows())
+
     def _verify_container(self, carrier_key: str) -> None:
         if self._reject_pending_device_job("核验或切换容器"):
             return
         if self._has_active_worker():
             self._show_error("扫描运行中不能切换容器")
             return
-        if self.current_task_id and self.repository.has_unresolved(self.current_task_id):
+        if self.current_task_id and self.repository.has_blocking_unresolved(
+            self.current_task_id
+        ):
             self._show_error("未解决的提交结果禁止切换容器")
             return
         carrier_key = carrier_key.strip()
@@ -1169,37 +1199,13 @@ class AppController(QObject):
         if config is None:
             self._show_error("当前承运商、分拣码与容器尚未保存")
             return
-        if self.mode is DeviceMode.REAL and not self.real_mode_authorized:
+        if not self.real_mode_authorized:
             self._show_error("实机操作未授权")
             return
-        if self.mode is DeviceMode.REAL and not self._connected:
+        if not self._connected:
             self._show_error("请先连接 PDA")
             return
         warehouse = str(self.settings.get("warehouse", "")).strip()
-        if self.mode is DeviceMode.SIMULATED:
-            warehouse = warehouse or SIMULATED_WAREHOUSE
-            adapter = self._make_simulator_adapter(configs=configs)
-            self.adapters[DeviceMode.SIMULATED] = adapter
-            manager = DeviceManager(adapter)
-            manager.refresh()
-            manager.connect("SIMULATED-PDA")
-            self.device_managers[DeviceMode.SIMULATED] = manager
-            controller = self._new_wms_controller(adapter, warehouse=warehouse)
-            self.wms_controller = controller
-            self.verified_session = None
-            self._controller_invalidated = False
-            self._run_job(
-                lambda: controller.verify_current_or_open_bag(config),
-                lambda session: self._container_verified(
-                    controller,
-                    session,
-                    config,
-                    expected_mode=DeviceMode.SIMULATED,
-                    expected_adapter=adapter,
-                ),
-                device_job=True,
-            )
-            return
         if not warehouse:
             self._show_error("请在设置中填写 WMS 仓库标识")
             return
@@ -1210,16 +1216,23 @@ class AppController(QObject):
                 real_submission_authorized=self.real_mode_authorized,
             )
             self._controller_invalidated = False
+            # A fresh controller holds no session; never switch from a stale one.
+            self.verified_session = None
         controller = self.wms_controller
         mode = self.mode
         adapter = self.adapter
         current_session = self.verified_session
         unresolved_submissions = int(
             self.current_task_id is not None
-            and self.repository.has_unresolved(self.current_task_id)
+            and self.repository.has_blocking_unresolved(self.current_task_id)
         )
 
         def verify() -> VerifiedSession:
+            # Only the controller's own session can be switched away from.
+            if getattr(controller, "active_session", None) is None:
+                return controller.verify_current_or_open_bag(
+                    config, unresolved_submissions=unresolved_submissions
+                )
             if current_session is not None and (
                 current_session.container_no != config.container_no
                 or current_session.sort_code != config.sort_code
@@ -1228,7 +1241,9 @@ class AppController(QObject):
                     config,
                     unresolved_submissions=unresolved_submissions,
                 )
-            return controller.verify_current_or_open_bag(config)
+            return controller.verify_current_or_open_bag(
+                config, unresolved_submissions=unresolved_submissions
+            )
 
         self._run_job(
             verify,
@@ -1240,6 +1255,7 @@ class AppController(QObject):
                 expected_adapter=adapter,
             ),
             device_job=True,
+            on_failure=lambda: self._container_check_failed(config),
         )
 
     def _container_verified(
@@ -1249,7 +1265,7 @@ class AppController(QObject):
         config: CarrierConfig,
         *,
         expected_mode: DeviceMode,
-        expected_adapter: FakeDeviceAdapter | AdbDeviceAdapter,
+        expected_adapter: DeviceAdapter,
     ) -> None:
         if (
             self.mode is not expected_mode
@@ -1272,6 +1288,8 @@ class AppController(QObject):
             app_version=self._current_wms_version(),
             session_verified=True,
         )
+        self._failed_container_checks.discard(self._container_check_key(config))
+        self.window.set_carrier_rows(self._carrier_rows())
         self._set_status("WMS 容器与分拣码已验证")
         self._refresh_gates()
 
@@ -1342,40 +1360,28 @@ class AppController(QObject):
         if self._has_active_worker():
             self._show_error("已有扫描任务占用设备")
             return
-        if self.mode is DeviceMode.REAL and not self.real_mode_authorized:
+        if not self.real_mode_authorized:
             self._show_error("实机操作未授权")
             return
-        if self.wms_controller is None or self.verified_session is None:
-            self._show_error("先在容器设置中验证 PDA")
+        if not self._connected:
+            self._show_error("请先连接 PDA")
             return
-        if not self._verified_session_valid():
-            self._show_error("PDA 会话已失效，请重新验证")
+        warehouse = str(self.settings.get("warehouse") or "").strip()
+        if not warehouse:
+            self._show_error("请在设置中填写 WMS 仓库标识")
             return
         if self._skip_physical_enabled() and not self._apply_authorized_skips():
             return
+        if self._controller_invalidated or self.wms_controller is None:
+            self.wms_controller = self._new_wms_controller(
+                self.adapter, warehouse=warehouse, real_submission_authorized=True
+            )
+            self._controller_invalidated = False
+            self.verified_session = None
         controller = self.wms_controller
-        repository = self.repository
 
         def session_provider(item: QueueItem) -> VerifiedSession:
-            current = self.verified_session
-            target = self._config_for_item(item)
-            if current is not None and (
-                current.container_no == item.container_no
-                and current.sort_code == item.sort_code
-                and current.warehouse == str(
-                    self.settings.get("warehouse") or SIMULATED_WAREHOUSE
-                )
-            ):
-                return current
-            if current is not None:
-                session = controller.switch_bag(
-                    target,
-                    unresolved_submissions=int(repository.has_unresolved(task_id)),
-                )
-            else:
-                session = controller.open_bag(target)
-            self.verified_session = session
-            return session
+            return self._provide_session(controller, task_id, item)
 
         try:
             self.task_service.start_task(
@@ -1383,6 +1389,12 @@ class AppController(QObject):
                 controller,
                 session_provider,
                 real_mode_authorized=self.real_mode_authorized,
+                scan_interval=(
+                    int(self.settings.get("scan_interval_min_seconds", 5)),
+                    int(self.settings.get("scan_interval_max_seconds", 30)),
+                    str(self.settings.get("scan_speed", "normal")),
+                ),
+                priority_item_ids=self.window.visible_workspace_item_ids(),
             )
         except Exception as exc:
             self._show_error(f"任务未启动：{exc}")
@@ -1391,6 +1403,31 @@ class AppController(QObject):
         self.window.set_running(True)
         self._set_status("任务运行中")
         self._poll()
+
+    def _provide_session(
+        self, controller: WmsController, task_id: str, item: QueueItem
+    ) -> VerifiedSession:
+        current = self.verified_session
+        target = self._config_for_item(item)
+        blocking = int(self.repository.has_blocking_unresolved(task_id))
+        if getattr(controller, "active_session", None) is None:
+            # An UNKNOWN result dropped the controller session: re-read the page and
+            # verify, back out of another bag, or open the target bag.
+            session = controller.verify_current_or_open_bag(
+                target, unresolved_submissions=blocking
+            )
+        elif current is not None and (
+            current.container_no == item.container_no
+            and current.sort_code == item.sort_code
+            and current.warehouse == str(self.settings.get("warehouse") or "")
+        ):
+            return current
+        elif current is not None:
+            session = controller.switch_bag(target, unresolved_submissions=blocking)
+        else:
+            session = controller.open_bag(target)
+        self.verified_session = session
+        return session
 
     def _pause_task(self) -> None:
         if not self.current_task_id:
@@ -1410,20 +1447,63 @@ class AppController(QObject):
             self._show_error(f"停止失败：{exc}")
         self._poll()
 
+    def _clear_task(self) -> None:
+        """Stop and unload the current task; its records stay in task history."""
+        if self._reject_pending_device_job("清空任务"):
+            return
+        task_id = self.current_task_id
+        if not task_id:
+            self._show_error("没有可清空任务")
+            return
+        if self.repository.has_blocking_unresolved(task_id):
+            # UNKNOWN items stay in task history for reconciliation; only
+            # IN_FLIGHT and unfinished duplicate recovery block clearing.
+            self._show_error("有提交中的包裹，请先完成核对")
+            return
+        worker = self.task_service.active_worker(task_id)
+        task = self.repository.get_task(task_id)
+        if (worker is not None and worker.is_alive()) or task.state in {
+            TaskState.RUNNING,
+            TaskState.PAUSING,
+        }:
+            self._show_error("请先停止任务")
+            return
+        try:
+            if task.state not in {TaskState.STOPPED, TaskState.COMPLETED}:
+                self.task_service.stop_task(task_id)
+        except Exception as exc:
+            self._show_error(f"清空失败：{exc}")
+            return
+        self.current_task_id = None
+        self.selected_history_task_id = None
+        self.current_preview = None
+        self.window.clear_import_preview()
+        self._last_refreshed_task = None
+        self._history_rows_cache = None
+        self._refresh_visible_data(force=True)
+        self._set_status("任务已清空")
+
     def _select_latest_task(self) -> None:
-        tasks = self.repository.list_task_summaries()
+        tasks = [
+            task
+            for task in self.repository.list_task_summaries()
+            if task["state"] is not TaskState.STOPPED
+        ]
         self.current_task_id = str(tasks[-1]["id"]) if tasks else None
         self.selected_history_task_id = self.current_task_id
         self._last_refreshed_task = None
 
     def _refresh_visible_data(self, *, force: bool = False) -> None:
         current_updated_at: datetime | None = None
+        current_counts: tuple[int, ...] = ()
         if self.current_task_id:
             try:
-                current_updated_at = self.repository.get_task(self.current_task_id).updated_at_utc
+                current = self.repository.get_task(self.current_task_id)
+                current_updated_at = current.updated_at_utc
+                current_counts = tuple(current.counts.by_status.values())
             except RepositoryError:
                 self.current_task_id = None
-        marker = (self.mode, self.current_task_id, current_updated_at)
+        marker = (self.mode, self.current_task_id, current_updated_at, current_counts)
         if not force and marker == self._last_refreshed_task:
             return
         self._last_refreshed_task = marker
@@ -1433,16 +1513,14 @@ class AppController(QObject):
                 items = self.repository.list_items(self.current_task_id)
                 self.window.set_queue_items(items)
                 task = self.repository.get_task(self.current_task_id)
-                self.window.set_current_task(task.name)
+                self.window.set_current_task(task.name, task.state)
                 stats = self.repository.statistics(self.current_task_id)
                 self.window.set_counts(
                     counts=stats,
                     attempted=stats.get("attempts", 0),
                     total=stats.get("total", len(items)),
                 )
-                self.window.set_activity_rows(
-                    self._task_activity_rows(self.current_task_id)[-100:]
-                )
+                self._refresh_activity(self.current_task_id, items=items)
             except RepositoryError as exc:
                 self._show_error(str(exc))
         else:
@@ -1450,6 +1528,7 @@ class AppController(QObject):
             self.window.set_current_task("")
             self.window.set_counts(success=0, duplicates=0, unknown=0, total=0)
             self.window.set_activity_rows(())
+            self._last_activity_revision = None
             self.window.set_unresolved_rows(())
         self._refresh_history()
         if self.selected_history_task_id:
@@ -1571,11 +1650,8 @@ class AppController(QObject):
 
     def _refresh_gates(self) -> None:
         items = self.repository.list_items(self.current_task_id) if self.current_task_id else ()
-        mode_is_simulation = self.mode is DeviceMode.SIMULATED
         self.window.set_task_preflight(
-            device_ready=(
-                self._device_ready() and (mode_is_simulation or self.real_mode_authorized)
-            ),
+            device_ready=self._device_ready() and self.real_mode_authorized,
             task_ready=self._task_ready(),
             physical_checks_complete=(
                 all(item.status is not ItemStatus.WAIT_PHYSICAL for item in items)
@@ -1583,14 +1659,11 @@ class AppController(QObject):
             )
             and bool(items),
             unresolved_count=self._unresolved_count(),
-            mode=self.mode,
             real_mode_authorized=self.real_mode_authorized,
         )
 
     def _device_ready(self) -> bool:
-        if self.mode is DeviceMode.SIMULATED:
-            return self._connected
-        return self._connected and self._verified_session_valid()
+        return self._connected and bool(str(self.settings.get("warehouse") or "").strip())
 
     def _task_ready(self) -> bool:
         if not self.current_task_id:
@@ -1618,7 +1691,8 @@ class AppController(QObject):
     def _unresolved_count(self) -> int:
         if not self.current_task_id:
             return 0
-        return self.repository.unresolved_count(self.current_task_id)
+        # Only blocking work stops a start; UNKNOWN items stay listed for later review.
+        return int(self.repository.has_blocking_unresolved(self.current_task_id))
 
     @staticmethod
     def _attempt_evidence(attempt: Mapping[str, object]) -> Mapping[str, object]:
@@ -1644,8 +1718,14 @@ class AppController(QObject):
             task = self.repository.get_task(self.current_task_id)
         except RepositoryError:
             return
-        marker = (self.mode, task.id, task.updated_at_utc)
+        marker = (
+            self.mode,
+            task.id,
+            task.updated_at_utc,
+            tuple(task.counts.by_status.values()),
+        )
         if marker == self._last_refreshed_task:
+            self._refresh_activity(task.id)
             return
         self.window.set_running(task.state in {TaskState.RUNNING, TaskState.PAUSING})
         if task.state is TaskState.BLOCKED:
@@ -1655,7 +1735,7 @@ class AppController(QObject):
                 self.wms_controller.invalidate_session()
                 self.wms_controller.real_submission_authorized = False
             self.window.set_device_status(connected=self._connected, session_verified=False)
-            if not self.repository.has_unresolved(task.id):
+            if not self.repository.has_blocking_unresolved(task.id):
                 try:
                     self.repository.transition_task(
                         task.id,
@@ -1663,7 +1743,7 @@ class AppController(QObject):
                         actor=self._actor,
                         reason="worker stopped with no unresolved WMS submissions",
                     )
-                    self._set_status("任务已暂停；修正后可重新预检")
+                    self._set_status("任务已暂停；请在活动记录查看原因")
                 except RepositoryError:
                     self._set_status("任务已阻止；请查看任务记录")
             else:
@@ -1672,12 +1752,20 @@ class AppController(QObject):
             self._controller_invalidated = True
             self.verified_session = None
             self.real_mode_authorized = False
-            self._set_authorization_check(False)
             if self.wms_controller is not None:
                 self.wms_controller.real_submission_authorized = False
                 self.wms_controller.invalidate_session()
             self.window.set_device_status(connected=self._connected, session_verified=False)
-            self._set_status("任务已停止；恢复前请重新授权并核验容器")
+            self._set_status("任务已停止；恢复前请重新连接设备")
+        elif task.state in {TaskState.RUNNING, TaskState.PAUSED, TaskState.COMPLETED}:
+            session = getattr(self.wms_controller, "active_session", None)
+            self.window.set_device_status(
+                connected=self._connected,
+                warehouse=session.warehouse if session else "",
+                container_no=session.container_no if session else "",
+                app_version=self._current_wms_version(),
+                session_verified=bool(session and session.valid),
+            )
         self._refresh_visible_data(force=True)
 
     def _filter_history(self, filters: Mapping[str, object]) -> None:
@@ -1693,6 +1781,27 @@ class AppController(QObject):
     def _select_history_task(self, task_id: str) -> None:
         self.selected_history_task_id = task_id
         self._refresh_history_detail(task_id)
+
+    def _confirm_workspace_result(self, item_id: str) -> None:
+        if self._has_active_worker():
+            self._show_error("扫描到达安全边界前不能确认通过")
+            return
+        try:
+            item = self.repository.get_item(item_id)
+            if item.task_id != self.current_task_id or item.status is not ItemStatus.UNKNOWN:
+                return
+            self.task_service.reconcile_unknown(
+                item.id,
+                ItemStatus.SUCCESS,
+                actor=self._actor,
+                reason="人工确认通过",
+            )
+        except RepositoryError as exc:
+            self._show_error(f"确认通过未保存：{exc}")
+            return
+        self._last_refreshed_task = None
+        self._refresh_visible_data(force=True)
+        self._set_status("已确认通过")
 
     def _open_reconciliation(self, item_id: str) -> None:
         if self._has_active_worker():
@@ -1759,7 +1868,25 @@ class AppController(QObject):
         )
         QMessageBox.information(self.window, "技术日志", details or "无记录")
 
-    def _task_activity_rows(self, task_id: str) -> list[tuple[str, str, str]]:
+    def _refresh_activity(self, task_id: str, *, items: Sequence[QueueItem] | None = None) -> None:
+        revision = (task_id, *self.repository.activity_revision(task_id))
+        if items is None:
+            if revision == self._last_activity_revision:
+                return
+            items = self.repository.list_items(task_id)
+        self.window.set_activity_rows(
+            self._task_activity_rows(task_id, items_by_id={item.id: item for item in items})[-100:]
+        )
+        self._last_activity_revision = revision
+
+    def _task_activity_rows(
+        self, task_id: str, *, items_by_id: Mapping[str, QueueItem] | None = None
+    ) -> list[tuple[str, str, str]]:
+        timezone = ZoneInfo(self.window.timezone_combo.currentData() or DEFAULT_REPORT_TIMEZONE)
+        scan_labels = {
+            ScanOutcome.SUCCESS: "扫描成功",
+            ScanOutcome.ALREADY_IN_BAG: "重复扫描，已跳过",
+        }
         activities = [
             (str(row["at_utc"]), str(row["level"]).upper(), str(row["message"]))
             for row in self.repository.logs(task_id=task_id)
@@ -1776,6 +1903,20 @@ class AppController(QObject):
                     or ""
                 )
             message = str(row["event_type"])
+            if items_by_id is not None and message == "attempt_finished":
+                item = items_by_id.get(str(row.get("item_id")))
+                label = scan_labels.get(summary)
+                if summary == ScanOutcome.REJECTED and isinstance(detail, Mapping):
+                    evidence = detail.get("evidence")
+                    if (
+                        isinstance(evidence, Mapping)
+                        and evidence.get("error_text") == ALREADY_GROUPED_REASON
+                    ):
+                        label = ALREADY_GROUPED_REASON
+                if item is not None and label:
+                    message = f"{label}：{item.carrier_key} · {item.tracking}"
+                    activities.append((str(row["at_utc"]), "EVENT", message))
+                    continue
             actor = str(row.get("actor") or "")
             if actor:
                 message = f"{message} · {actor}"
@@ -1790,7 +1931,7 @@ class AppController(QObject):
             )
         activities.sort(key=lambda activity: activity[0])
         return [
-            (at[11:19], level, message)
+            (datetime.fromisoformat(at).astimezone(timezone).strftime("%H:%M:%S"), level, message)
             for at, level, message in activities
         ]
 
@@ -2025,7 +2166,6 @@ class AppController(QObject):
             self.verified_session = None
             self._controller_invalidated = True
             self.real_mode_authorized = False
-            self._set_authorization_check(False)
             self.window.set_device_status(connected=self._connected, session_verified=False)
             self.repository.append_log(
                 "info",
@@ -2056,12 +2196,10 @@ class AppController(QObject):
             self._show_error(f"恢复失败：{exc}")
 
     def _current_wms_version(self) -> str:
-        if self.mode is DeviceMode.SIMULATED:
-            return "模拟 WMS"
         return self._wms_app_version or "WMS 版本未读取"
 
     def _run_diagnostics(self) -> None:
-        adb_path = str(self.settings.get("adb_path") or shutil.which("adb") or "adb")
+        adb_path = self._adb_path
         adb_ok = (
             Path(adb_path).is_file()
             if Path(adb_path).parent != Path(".")
@@ -2070,24 +2208,19 @@ class AppController(QObject):
         results = {
             "adb": "可用" if adb_ok else "缺失",
             "driver": (
-                "模拟"
-                if self.mode is DeviceMode.SIMULATED
-                else (
-                    "环境已配置"
-                    if os.environ.get("ADB_LIBUSB", "").strip() == "1"
-                    else "待检查"
-                )
+                "环境已配置" if os.environ.get("ADB_LIBUSB", "").strip() == "1" else "待检查"
             ),
             "database": "已初始化" if self.repository.path.is_file() else "不可用",
             "device": "已授权" if self._connected else "未连接",
             "wms": "会话有效" if self._verified_session_valid() else "未验证",
             "wms_version": self._current_wms_version()
-            if self.mode is DeviceMode.SIMULATED or self._wms_app_version
+            if self._wms_app_version
             else "未读取",
         }
         self.window.set_diagnostics(results)
 
     def close(self) -> None:
+        self._stop_device_preview()
         if hasattr(self, "_poll_timer"):
             self._poll_timer.stop()
         workers = []

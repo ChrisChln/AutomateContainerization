@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from tt_auto_bag_scanner.application.scan_worker import ScanWorker
 from tt_auto_bag_scanner.domain.device import WmsController
@@ -32,6 +32,8 @@ class TaskService:
         session_provider: Callable[[QueueItem], VerifiedSession],
         *,
         real_mode_authorized: bool = False,
+        scan_interval: tuple[int, int, str] = (5, 30, "none"),
+        priority_item_ids: Iterable[str] = (),
     ) -> ScanWorker:
         with self._lock:
             for running_task_id, worker in self._workers.items():
@@ -49,9 +51,9 @@ class TaskService:
                 )
             if task.state not in {TaskState.READY, TaskState.PAUSED, TaskState.STOPPED}:
                 raise RepositoryError(f"task cannot start from {task.state.value}")
-            if self.repository.has_unresolved(task_id):
+            if self.repository.has_blocking_unresolved(task_id):
                 raise RepositoryError(
-                    "unknown submission or unfinished duplicate recovery requires reconciliation"
+                    "in-flight submission or unfinished duplicate recovery requires reconciliation"
                 )
             if task.device_mode.value == "real":
                 if not real_mode_authorized or not task.real_mode_authorized:
@@ -74,6 +76,8 @@ class TaskService:
                 controller,
                 session_provider,
                 actor=self.actor,
+                scan_interval=scan_interval,
+                priority_item_ids=priority_item_ids,
             )
             self._workers[task_id] = worker
             worker.start()

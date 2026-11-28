@@ -7,9 +7,10 @@ from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 
 from PySide6.QtCore import QDate, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QSyntaxHighlighter
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -23,8 +24,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QTableWidget,
@@ -34,12 +37,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tt_auto_bag_scanner.domain.models import DeviceInfo, DeviceMode, ItemStatus, QueueItem
+from tt_auto_bag_scanner.domain.models import (
+    ALREADY_GROUPED_REASON,
+    DeviceInfo,
+    ItemStatus,
+    QueueItem,
+    TaskState,
+)
 
 # Site-confirmed report timezone; a saved choice still takes precedence.
 DEFAULT_REPORT_TIMEZONE = "America/New_York"
 # Carrier/sort pair found in a report that still needs a container number.
+CONTAINER_VERIFICATION_LABELS = {
+    "verified": "已验证",
+    "failed": "验证失败",
+    "unverified": "未验证",
+}
 PENDING_CARRIER_STATE = "待填大包号"
+SCAN_SPEED_LABELS = {"slow": "慢", "normal": "正常", "fast": "快", "none": "无间隔"}
 
 
 class PhysicalCheckDialog(QDialog):
@@ -249,7 +264,6 @@ class PreflightDialog(QDialog):
     def __init__(
         self,
         *,
-        mode: DeviceMode,
         device_ready: bool,
         task_ready: bool,
         physical_checks_complete: bool,
@@ -266,11 +280,11 @@ class PreflightDialog(QDialog):
         title.setObjectName("pageTitle")
         layout.addWidget(title)
         layout.addWidget(QLabel(f"可执行 / 已核验：{eligible_count} / {verified_count}"))
-        layout.addWidget(QLabel("模式：模拟" if mode is DeviceMode.SIMULATED else "模式：实机"))
+        layout.addWidget(QLabel("模式：实机"))
         self.check_rows: dict[str, QLabel] = {}
         checks = (
             ("报表与去重", task_ready),
-            ("设备与容器", device_ready),
+            ("PDA 与仓库设置", device_ready),
             ("实物核验", physical_checks_complete),
             ("未解决结果", unresolved_count == 0),
         )
@@ -289,21 +303,47 @@ class PreflightDialog(QDialog):
         ready = device_ready and task_ready and physical_checks_complete and unresolved_count == 0
         actions = QHBoxLayout()
         self.cancel_button = QPushButton("取消")
-        self.start_simulation_button = QPushButton("开始模拟")
-        self.start_simulation_button.setObjectName("primaryAction")
         self.start_live_button = QPushButton("开始实扫")
-        self.start_live_button.setEnabled(
-            ready and mode is DeviceMode.REAL and real_mode_authorized
-        )
-        self.start_simulation_button.setEnabled(ready and mode is DeviceMode.SIMULATED)
+        self.start_live_button.setObjectName("primaryAction")
+        self.start_live_button.setEnabled(ready and real_mode_authorized)
         actions.addWidget(self.cancel_button)
-        actions.addWidget(self.start_simulation_button)
         actions.addWidget(self.start_live_button)
         layout.addLayout(actions)
         self.cancel_button.clicked.connect(self.reject)
-        self.start_simulation_button.clicked.connect(self.accept)
         self.start_live_button.clicked.connect(self.accept)
-        self.selected_mode = mode
+
+
+class ActivityLogHighlighter(QSyntaxHighlighter):
+    LEVEL_COLORS = {
+        "[WARN]": QColor("#fcd34d"),
+        "[WARNING]": QColor("#fcd34d"),
+        "[ERROR]": QColor("#fca5a5"),
+        "[CRITICAL]": QColor("#fca5a5"),
+    }
+    RESULT_COLORS = {
+        "扫描成功": QColor("#86efac"),
+        "重复扫描，已跳过": QColor("#93c5fd"),
+        "待核对": QColor("#fcd34d"),
+        "attempt_marked_unknown": QColor("#fcd34d"),
+    }
+
+    def highlightBlock(self, text: str) -> None:
+        timestamp, separator, activity = text.partition("  ")
+        level, separator, message = activity.partition("  ")
+        if not separator:
+            return
+        level_start = len(timestamp) + 2
+        if (color := self.LEVEL_COLORS.get(level)) is not None:
+            self.setFormat(level_start, len(level), color)
+        message_start = level_start + len(level) + 2
+        for result, color in self.RESULT_COLORS.items():
+            if message.startswith(result):
+                self.setFormat(message_start, len(result), color)
+                return
+        if message.startswith("attempt_finished · ") and message.endswith(" · unknown"):
+            # Qt text offsets count UTF-16 code units, including in the operator name.
+            start = len(text.removesuffix("unknown").encode("utf-16-le")) // 2
+            self.setFormat(start, len("unknown"), self.RESULT_COLORS["待核对"])
 
 
 class MainWindow(QMainWindow):
@@ -311,6 +351,7 @@ class MainWindow(QMainWindow):
 
     open_report_requested = Signal()
     preview_requested = Signal(dict)
+    clear_task_requested = Signal()
     preview_export_requested = Signal(object)
     sort_code_overrides_requested = Signal(object)
     review_task_requested = Signal()
@@ -318,8 +359,6 @@ class MainWindow(QMainWindow):
     excluded_rows_requested = Signal()
     device_refresh_requested = Signal()
     device_connect_requested = Signal(str)
-    mode_change_requested = Signal(object)
-    real_mode_authorization_requested = Signal(bool)
     physical_check_requested = Signal(str, str)
     cancel_item_requested = Signal(str)
     carrier_save_requested = Signal(dict)
@@ -327,9 +366,13 @@ class MainWindow(QMainWindow):
     export_requested = Signal(str)
     diagnostics_requested = Signal()
     container_verify_requested = Signal(str)
+    workspace_confirmation_requested = Signal(str)
     reconciliation_requested = Signal(str)
     import_source_changed = Signal(str, int)
     settings_save_requested = Signal(dict)
+    scan_speed_requested = Signal(str)
+    sort_mode_requested = Signal(str)
+    visible_queue_items_changed = Signal(list)
     backup_requested = Signal()
     restore_requested = Signal()
     adb_path_browse_requested = Signal()
@@ -347,7 +390,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("TT Auto Bag Scanner")
         self.resize(1440, 900)
         self.setMinimumSize(1180, 720)
-        self._mode = DeviceMode.SIMULATED
         self._real_mode_authorized = False
         self._device_ready = False
         self._task_ready = False
@@ -355,6 +397,7 @@ class MainWindow(QMainWindow):
         self._unresolved_count = 0
         self._is_running = False
         self._queue_items: list[QueueItem] = []
+        self._last_visible_workspace_ids: list[str] | None = None
         # Preview-only rows that still need a container; never queue items.
         self._awaiting_rows: list[object] = []
         self._queue_page_size = 200
@@ -432,7 +475,7 @@ class MainWindow(QMainWindow):
         bottom.setContentsMargins(12, 6, 12, 6)
         bottom.setSpacing(18)
         self.device_status_label = self._status_pill("设备未连接", "muted")
-        self.status_mode_label = self._status_pill("模拟 · 不提交 WMS", "safe")
+        self.status_mode_label = self._status_pill("实机", "warning")
         self.local_status_label = QLabel("本地记录已保存")
         self.help_status_label = QLabel("F1 帮助")
         for widget in (
@@ -468,7 +511,10 @@ class MainWindow(QMainWindow):
         heading_row.addWidget(title)
         heading_row.addWidget(self.workspace_task_label)
         heading_row.addStretch(1)
-        self.start_button = QPushButton("开始模拟")
+        self.workspace_task_state_label = QLabel("任务状态：无任务")
+        self.workspace_task_state_label.setObjectName("progressValue")
+        heading_row.addWidget(self.workspace_task_state_label)
+        self.start_button = QPushButton("开始实扫")
         self.start_button.setObjectName("primaryAction")
         self.pause_button = QPushButton("暂停")
         self.stop_button = QPushButton("停止")
@@ -478,6 +524,43 @@ class MainWindow(QMainWindow):
         heading_row.addWidget(self.pause_button)
         heading_row.addWidget(self.stop_button)
         layout.addLayout(heading_row)
+
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(QLabel("扫描速度"))
+        self.workspace_speed_buttons = self._add_scan_speed_buttons(speed_row)
+        speed_row.addSpacing(24)
+        speed_row.addWidget(QLabel("排序模式"))
+        self.sort_mode_buttons: dict[str, QPushButton] = {}
+        sort_mode_group = QButtonGroup(self)
+        for mode, label in (("single", "单排序"), ("mixed", "混合排序")):
+            button = QPushButton(label)
+            button.setObjectName("scanSpeed")
+            button.setCheckable(True)
+            sort_mode_group.addButton(button)
+            button.clicked.connect(
+                lambda checked, value=mode: self.sort_mode_requested.emit(value)
+            )
+            speed_row.addWidget(button)
+            self.sort_mode_buttons[mode] = button
+        self.sort_mode_buttons["single"].setChecked(True)
+        speed_row.addSpacing(24)
+        speed_row.addWidget(QLabel("承运商"))
+        self.workspace_carrier_filter = QComboBox()
+        self.workspace_carrier_filter.addItem("全部", "")
+        self.workspace_carrier_filter.setMinimumWidth(110)
+        speed_row.addWidget(self.workspace_carrier_filter)
+        speed_row.addWidget(QLabel("结果"))
+        self.workspace_status_filter = QComboBox()
+        self.workspace_status_filter.addItem("全部", "")
+        for status in ItemStatus:
+            if status.value != "awaiting_container":
+                self.workspace_status_filter.addItem(self._status_text(status.value), status.value)
+        self.workspace_status_filter.setMinimumWidth(96)
+        speed_row.addWidget(self.workspace_status_filter)
+        self.workspace_carrier_filter.currentIndexChanged.connect(self._workspace_filter_changed)
+        self.workspace_status_filter.currentIndexChanged.connect(self._workspace_filter_changed)
+        speed_row.addStretch(1)
+        layout.addLayout(speed_row)
 
         progress_row = QHBoxLayout()
         self.task_progress_label = QLabel("已确认 0 / 0")
@@ -497,11 +580,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.status_counts_second_label)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.workspace_table = QTableWidget(0, 5)
+        self.workspace_table = QTableWidget(0, 6)
         self.workspace_table.setHorizontalHeaderLabels(
-            ["追踪号", "承运商", "出库时间", "实物核验", "结果"]
+            ["追踪号", "承运商", "出库时间", "实物核验", "年龄", "结果"]
         )
         self._prepare_table(self.workspace_table)
+        self.workspace_table.setColumnWidth(4, 72)
         workspace_queue = QWidget()
         workspace_queue_layout = QVBoxLayout(workspace_queue)
         workspace_queue_layout.setContentsMargins(0, 0, 0, 0)
@@ -550,7 +634,7 @@ class MainWindow(QMainWindow):
         self.workspace_physical_button.setEnabled(False)
         self.cancel_item_button = QPushButton("取消包裹")
         self.cancel_item_button.setEnabled(False)
-        self.review_result_button = QPushButton("核对 WMS 结果")
+        self.review_result_button = QPushButton("确认通过")
         self.review_result_button.setEnabled(False)
         detail_layout.addWidget(self.workspace_physical_button)
         detail_layout.addWidget(self.cancel_item_button)
@@ -568,11 +652,18 @@ class MainWindow(QMainWindow):
         self.activity_log_label = QLabel("0 条")
         activity_header.addWidget(self.activity_log_label)
         layout.addLayout(activity_header)
-        self.activity_table = QTableWidget(0, 3)
-        self.activity_table.setHorizontalHeaderLabels(["时间", "级别", "事件"])
-        self._prepare_table(self.activity_table)
-        self.activity_table.setMaximumHeight(180)
-        layout.addWidget(self.activity_table)
+        self.activity_console = QPlainTextEdit()
+        self._activity_log_highlighter = ActivityLogHighlighter(self.activity_console.document())
+        self.activity_console.setReadOnly(True)
+        self.activity_console.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.activity_console.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.activity_console.setStyleSheet(
+            "QPlainTextEdit { background: #172128; color: #e3ebef; padding: 8px; "
+            "border: 1px solid #344650; border-radius: 6px; "
+            "selection-background-color: #32616b; selection-color: #ffffff; }"
+        )
+        self.activity_console.setMaximumHeight(180)
+        layout.addWidget(self.activity_console)
 
         self.workspace_table.itemSelectionChanged.connect(self._update_workspace_selection)
         self.workspace_physical_button.clicked.connect(
@@ -644,13 +735,11 @@ class MainWindow(QMainWindow):
         self.threshold_spin.setDecimals(0)
         self.threshold_spin.setValue(30)
         self.threshold_spin.setSuffix(" 分钟")
-        self.confirm_threshold_check = QCheckBox("确认阈值")
         form.addWidget(QLabel("报表时区"), 3, 2)
         form.addWidget(self.timezone_combo, 3, 3)
         form.addWidget(QLabel("筛选阈值"), 3, 4)
         form.addWidget(self.threshold_spin, 3, 5)
-        form.addWidget(self.confirm_threshold_check, 3, 6)
-        form.addWidget(self.preview_button, 3, 7)
+        form.addWidget(self.preview_button, 3, 6, 1, 2)
         layout.addWidget(import_panel)
 
         import_counts = QHBoxLayout()
@@ -703,8 +792,11 @@ class MainWindow(QMainWindow):
         self.item_detail_label = QLabel("未选择包裹")
         self.review_task_button = QPushButton("审核任务")
         self.review_task_button.setEnabled(False)
+        self.clear_task_button = QPushButton("清空任务")
+        self.clear_task_button.setEnabled(False)
         action_row.addWidget(self.physical_check_button)
         action_row.addWidget(self.item_detail_label, 1)
+        action_row.addWidget(self.clear_task_button)
         action_row.addWidget(self.review_task_button)
         layout.addLayout(action_row)
 
@@ -722,6 +814,7 @@ class MainWindow(QMainWindow):
         self.excluded_rows_button.clicked.connect(self.excluded_rows_requested.emit)
         self.excluded_rows_button.clicked.connect(self._show_excluded_rows)
         self.review_task_button.clicked.connect(self.review_task_requested.emit)
+        self.clear_task_button.clicked.connect(self._confirm_clear_task)
         self._pages["导入报表"] = page
 
     def _build_device_page(self) -> None:
@@ -737,15 +830,10 @@ class MainWindow(QMainWindow):
         form.setContentsMargins(18, 18, 18, 18)
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(12)
-        self.device_mode_combo = QComboBox()
-        self.device_mode_combo.addItem("模拟", DeviceMode.SIMULATED)
-        self.device_mode_combo.addItem("真实设备", DeviceMode.REAL)
         self.device_combo = QComboBox()
         self.device_combo.addItem("未发现设备", "")
         self.device_refresh_button = QPushButton("刷新设备")
         self.device_connect_button = QPushButton("连接")
-        self.device_authorize_check = QCheckBox("授权本站实机作业")
-        self.device_authorize_check.setChecked(False)
         self.app_version_label = QLabel("WMS 版本未验证")
         self.session_status_label = QLabel("会话未验证")
         self.operator_id_edit = QLineEdit()
@@ -767,16 +855,14 @@ class MainWindow(QMainWindow):
         self.minimum_age_spin.setSuffix(" 分钟")
         self.confirm_minimum_age_check = QCheckBox("确认筛选阈值")
         self.skip_physical_check = QCheckBox("跳过实物核验")
+        self.auto_connect_check = QCheckBox("启动时自动连接")
         self.save_settings_button = QPushButton("保存设置")
         self.backup_button = QPushButton("备份本地记录")
         self.restore_button = QPushButton("恢复记录")
-        form.addWidget(QLabel("运行模式"), 0, 0)
-        form.addWidget(self.device_mode_combo, 0, 1)
         form.addWidget(QLabel("设备"), 1, 0)
         form.addWidget(self.device_combo, 1, 1, 1, 2)
         form.addWidget(self.device_refresh_button, 1, 3)
         form.addWidget(self.device_connect_button, 1, 4)
-        form.addWidget(self.device_authorize_check, 2, 1, 1, 3)
         form.addWidget(self.app_version_label, 3, 1, 1, 3)
         form.addWidget(self.session_status_label, 4, 1, 1, 3)
         form.addWidget(QLabel("操作员"), 5, 0)
@@ -789,18 +875,36 @@ class MainWindow(QMainWindow):
         form.addWidget(self.minimum_age_spin, 6, 3)
         form.addWidget(self.confirm_minimum_age_check, 6, 4)
         form.addWidget(self.skip_physical_check, 7, 1, 1, 2)
+        form.addWidget(self.auto_connect_check, 7, 3)
         form.addWidget(self.save_settings_button, 7, 4)
         form.addWidget(self.backup_button, 8, 3)
         form.addWidget(self.restore_button, 8, 4)
         form.addWidget(QLabel("ADB"), 9, 0)
         form.addWidget(self.adb_path_edit, 9, 1, 1, 3)
         form.addWidget(self.adb_path_browse_button, 9, 4)
+        interval_row = QHBoxLayout()
+        self.scan_interval_min = QSpinBox()
+        self.scan_interval_max = QSpinBox()
+        for spin, default, label in (
+            (self.scan_interval_min, 5, "最短间隔"),
+            (self.scan_interval_max, 30, "最长间隔"),
+        ):
+            spin.setRange(0, 86400)
+            spin.setValue(default)
+            spin.setSuffix(" 秒")
+            spin.setAccessibleName(label)
+        interval_row.addWidget(self.scan_interval_min)
+        interval_row.addWidget(QLabel("至"))
+        interval_row.addWidget(self.scan_interval_max)
+        interval_row.addSpacing(12)
+        self.settings_speed_buttons = self._add_scan_speed_buttons(interval_row)
+        interval_row.addStretch(1)
+        form.addWidget(QLabel("扫描间隔"), 10, 0)
+        form.addLayout(interval_row, 10, 1, 1, 4)
         layout.addWidget(panel)
         layout.addStretch(1)
         self.device_refresh_button.clicked.connect(self.device_refresh_requested.emit)
         self.device_connect_button.clicked.connect(self._request_connection)
-        self.device_mode_combo.currentIndexChanged.connect(self._mode_selected)
-        self.device_authorize_check.toggled.connect(self.real_mode_authorization_requested.emit)
         self.save_settings_button.clicked.connect(self._save_settings)
         self.backup_button.clicked.connect(self.backup_requested.emit)
         self.restore_button.clicked.connect(self.restore_requested.emit)
@@ -841,9 +945,9 @@ class MainWindow(QMainWindow):
         form.addWidget(self.container_verify_button, 3, 1)
         form.addWidget(self.carrier_save_button, 3, 2)
         layout.addWidget(panel)
-        self.carrier_table = QTableWidget(0, 6)
+        self.carrier_table = QTableWidget(0, 7)
         self.carrier_table.setHorizontalHeaderLabels(
-            ["键", "承运商", "别名", "分拣码", "容器", "状态"]
+            ["键", "承运商", "别名", "分拣码", "容器", "状态", "验证"]
         )
         self._prepare_table(self.carrier_table)
         layout.addWidget(self.carrier_table, 1)
@@ -997,6 +1101,41 @@ class MainWindow(QMainWindow):
         layout.addWidget(following)
         return layout
 
+    def _workspace_filter_changed(self, *_args: object) -> None:
+        self._workspace_page = 0
+        self._render_queue_tables()
+        self._update_workspace_selection()
+
+    def _workspace_visible_items(self) -> list[QueueItem]:
+        carrier = self.workspace_carrier_filter.currentData() or ""
+        status = self.workspace_status_filter.currentData() or ""
+        return [
+            item
+            for item in self._queue_items
+            if (not carrier or item.carrier_key == carrier)
+            and (not status or item.status.value == status)
+        ]
+
+    def visible_workspace_item_ids(self) -> list[str]:
+        start = self._workspace_page * self._queue_page_size
+        items = self._workspace_visible_items()[start : start + self._queue_page_size]
+        return [item.id for item in items]
+
+    def _refresh_workspace_carrier_filter(self) -> None:
+        combo = self.workspace_carrier_filter
+        current = combo.currentData() or ""
+        carriers = sorted({item.carrier_key for item in self._queue_items})
+        existing = [combo.itemData(index) for index in range(1, combo.count())]
+        if existing == carriers:
+            return
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("全部", "")
+        for carrier in carriers:
+            combo.addItem(carrier, carrier)
+        combo.setCurrentIndex(max(0, combo.findData(current)))
+        combo.blockSignals(False)
+
     def _change_queue_page(self, table_key: str, delta: int) -> None:
         if table_key == "workspace":
             self._workspace_page = max(0, self._workspace_page + delta)
@@ -1026,6 +1165,11 @@ class MainWindow(QMainWindow):
             "awaiting_container": PENDING_CARRIER_STATE,
         }
         return labels.get(status, status)
+
+    def _item_result_text(self, item: QueueItem) -> str:
+        if item.status is ItemStatus.REJECTED and item.last_attempt_error == ALREADY_GROUPED_REASON:
+            return "重复扫描"
+        return self._status_text(item.status.value)
 
     def _apply_style(self) -> None:
         self.setStyleSheet(
@@ -1091,6 +1235,7 @@ class MainWindow(QMainWindow):
                 font-weight: 600;
             }
             QPushButton:hover { background: #d4dfe2; }
+            QPushButton#scanSpeed:checked { background: #d2e4e4; color: #0d5a52; }
             QPushButton:disabled { background: #e9edef; color: #98a5aa; }
             QPushButton#primaryAction {
                 background: #116b61;
@@ -1175,7 +1320,6 @@ class MainWindow(QMainWindow):
         }
         mapping["report_timezone"] = self.timezone_combo.currentData()
         mapping["threshold_minutes"] = int(self.threshold_spin.value())
-        mapping["threshold_confirmed"] = self.confirm_threshold_check.isChecked()
         mapping["path"] = self.report_path_edit.text()
         mapping["sheet_name"] = self.sheet_combo.currentData()
         mapping["header_row"] = int(self.header_row_spin.value())
@@ -1184,20 +1328,15 @@ class MainWindow(QMainWindow):
             not mapping["path"]
             or not mapping["sheet_name"]
             or not mapping["report_timezone"]
-            or not mapping["threshold_confirmed"]
             or any(not mapping[key] for key in required)
         ):
-            self.preview_status_label.setText("确认文件、字段、时区与阈值")
+            self.preview_status_label.setText("请选择文件、字段和时区")
             return
         self.preview_requested.emit(mapping)
 
     def _request_connection(self) -> None:
         self.device_connect_requested.emit(str(self.device_combo.currentData() or ""))
 
-    def _mode_selected(self, index: int) -> None:
-        mode = self.device_mode_combo.itemData(index)
-        if mode is not None:
-            self.mode_change_requested.emit(mode)
 
     def _request_physical_check(self, table: QTableWidget) -> None:
         row = table.currentRow()
@@ -1233,14 +1372,14 @@ class MainWindow(QMainWindow):
             self.cancel_item_button.setEnabled(False)
             self.review_result_button.setEnabled(False)
             return
-        item = self._queue_items[index]
+        item = self._workspace_visible_items()[index]
         self.selected_tracking_label.setText(item.tracking)
         checked = item.physical_check_id is not None or item.status.value not in {
             "wait_physical",
             "ready",
         }
         self.selected_placement_label.setText("实物已核验" if checked else "实物未核验")
-        self.selected_result_label.setText(f"结果：{self._status_text(item.status.value)}")
+        self.selected_result_label.setText(f"结果：{self._item_result_text(item)}")
         self.workspace_physical_button.setEnabled(
             not self._is_running and item.status.value in {"wait_physical", "ready"}
         )
@@ -1260,14 +1399,14 @@ class MainWindow(QMainWindow):
         row = self.workspace_table.currentRow()
         index = self._table_global_index(self.workspace_table, row)
         if index is not None:
-            self.reconciliation_requested.emit(self._queue_items[index].id)
+            self.workspace_confirmation_requested.emit(self._workspace_visible_items()[index].id)
 
     def _request_cancel_item(self) -> None:
         row = self.workspace_table.currentRow()
         index = self._table_global_index(self.workspace_table, row)
         if index is None or self._is_running:
             return
-        item = self._queue_items[index]
+        item = self._workspace_visible_items()[index]
         if item.status not in {ItemStatus.WAIT_PHYSICAL, ItemStatus.READY}:
             return
         answer = QMessageBox.question(
@@ -1288,7 +1427,9 @@ class MainWindow(QMainWindow):
         return index if index < len(self._items_for_table(table)) else None
 
     def _items_for_table(self, table: QTableWidget) -> list[QueueItem]:
-        return self._queue_items if table is self.workspace_table else self._preview_visible_items()
+        if table is self.workspace_table:
+            return self._workspace_visible_items()
+        return self._preview_visible_items()
 
     def _preview_visible_items(self) -> list[QueueItem]:
         query = self.candidate_search_edit.text().strip().casefold()
@@ -1316,7 +1457,6 @@ class MainWindow(QMainWindow):
             for item in self._queue_items
         )
         dialog = PreflightDialog(
-            mode=self._mode,
             device_ready=self._device_ready,
             task_ready=self._task_ready,
             physical_checks_complete=self._physical_checks_complete,
@@ -1326,6 +1466,7 @@ class MainWindow(QMainWindow):
             verified_count=verified_count,
             parent=self,
         )
+        dialog.start_live_button.setText(self.start_button.text())
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self.start_requested.emit()
@@ -1381,6 +1522,29 @@ class MainWindow(QMainWindow):
     def _verify_container_mapping(self) -> None:
         self.container_verify_requested.emit(self.carrier_key_edit.text().strip())
 
+    def _add_scan_speed_buttons(self, layout: QHBoxLayout) -> dict[str, QPushButton]:
+        group = QButtonGroup(self)
+        buttons = {}
+        for speed, label in SCAN_SPEED_LABELS.items():
+            button = QPushButton(label)
+            button.setObjectName("scanSpeed")
+            button.setCheckable(True)
+            group.addButton(button)
+            button.clicked.connect(
+                lambda checked, value=speed: self.scan_speed_requested.emit(value)
+            )
+            layout.addWidget(button)
+            buttons[speed] = button
+        buttons["normal"].setChecked(True)
+        return buttons
+
+    def set_sort_mode(self, mode: str) -> None:
+        self.sort_mode_buttons.get(mode, self.sort_mode_buttons["single"]).setChecked(True)
+
+    def set_scan_speed(self, speed: str) -> None:
+        for buttons in (self.workspace_speed_buttons, self.settings_speed_buttons):
+            buttons.get(speed, buttons["normal"]).setChecked(True)
+
     def _save_settings(self) -> None:
         self.settings_save_requested.emit(
             {
@@ -1391,8 +1555,9 @@ class MainWindow(QMainWindow):
                 "minimum_age_minutes": int(self.minimum_age_spin.value()),
                 "minimum_age_confirmed": self.confirm_minimum_age_check.isChecked(),
                 "skip_physical_check": self.skip_physical_check.isChecked(),
-                "real_mode_authorized": self.device_authorize_check.isChecked(),
-                "mode": self._mode.value,
+                "auto_connect_device": self.auto_connect_check.isChecked(),
+                "scan_interval_min_seconds": self.scan_interval_min.value(),
+                "scan_interval_max_seconds": self.scan_interval_max.value(),
             }
         )
 
@@ -1406,10 +1571,11 @@ class MainWindow(QMainWindow):
             bool(settings.get("minimum_age_confirmed", False))
         )
         self.skip_physical_check.setChecked(settings.get("skip_physical_check") is True)
-        authorized = bool(settings.get("real_mode_authorized", False))
-        self.device_authorize_check.blockSignals(True)
-        self.device_authorize_check.setChecked(authorized)
-        self.device_authorize_check.blockSignals(False)
+        self.auto_connect_check.setChecked(settings.get("auto_connect_device") is True)
+        self.set_sort_mode(str(settings.get("sort_mode", "single")))
+        self.scan_interval_min.setValue(int(settings.get("scan_interval_min_seconds", 5)))
+        self.scan_interval_max.setValue(int(settings.get("scan_interval_max_seconds", 30)))
+        self.set_scan_speed(str(settings.get("scan_speed", "normal")))
 
     def _request_history_filter(self) -> None:
         self.history_filter_requested.emit(
@@ -1500,16 +1666,13 @@ class MainWindow(QMainWindow):
         task_ready: bool,
         physical_checks_complete: bool,
         unresolved_count: int,
-        mode: DeviceMode,
         real_mode_authorized: bool = False,
     ) -> None:
         self._device_ready = device_ready
         self._task_ready = task_ready
         self._physical_checks_complete = physical_checks_complete
         self._unresolved_count = unresolved_count
-        self._mode = mode
         self._real_mode_authorized = real_mode_authorized
-        self.set_mode(mode)
         self._refresh_start_gate()
 
     def set_running(self, running: bool) -> None:
@@ -1517,12 +1680,12 @@ class MainWindow(QMainWindow):
         self.pause_button.setEnabled(running)
         self.stop_button.setEnabled(running)
         for widget in (
-            self.device_mode_combo,
             self.device_combo,
             self.device_refresh_button,
             self.device_connect_button,
-            self.device_authorize_check,
             self.save_settings_button,
+            self.scan_interval_min,
+            self.scan_interval_max,
             self.restore_button,
             self.open_report_button,
             self.preview_button,
@@ -1550,26 +1713,8 @@ class MainWindow(QMainWindow):
             and self._physical_checks_complete
             and self._unresolved_count == 0
             and not self._is_running
-            and (self._mode is DeviceMode.SIMULATED or self._real_mode_authorized)
+            and self._real_mode_authorized
         )
-
-    def set_mode(self, mode: DeviceMode) -> None:
-        self._mode = mode
-        self.status_mode_label.setText(
-            "模拟 · 不提交 WMS" if mode is DeviceMode.SIMULATED else "实机"
-        )
-        self.status_mode_label.setProperty(
-            "kind", "safe" if mode is DeviceMode.SIMULATED else "warning"
-        )
-        self.start_button.setText("开始模拟" if mode is DeviceMode.SIMULATED else "开始实扫")
-        self.status_mode_label.style().unpolish(self.status_mode_label)
-        self.status_mode_label.style().polish(self.status_mode_label)
-        index = self.device_mode_combo.findData(mode)
-        if index >= 0 and index != self.device_mode_combo.currentIndex():
-            self.device_mode_combo.blockSignals(True)
-            self.device_mode_combo.setCurrentIndex(index)
-            self.device_mode_combo.blockSignals(False)
-        self._refresh_start_gate()
 
     def set_report_path(self, path: str) -> None:
         self.report_path_edit.setText(path)
@@ -1622,7 +1767,6 @@ class MainWindow(QMainWindow):
             self.header_row_spin,
             self.timezone_combo,
             self.threshold_spin,
-            self.confirm_threshold_check,
             self.candidate_search_edit,
             *self.column_combos.values(),
         ):
@@ -1696,9 +1840,10 @@ class MainWindow(QMainWindow):
 
     def set_queue_items(self, items: Iterable[QueueItem]) -> None:
         self._queue_items = list(items)
+        self._refresh_workspace_carrier_filter()
         self._workspace_page = min(
             self._workspace_page,
-            max(0, (len(self._queue_items) - 1) // self._queue_page_size),
+            max(0, (len(self._workspace_visible_items()) - 1) // self._queue_page_size),
         )
         visible_preview_items = self._preview_visible_items()
         self._preview_page = min(
@@ -1708,6 +1853,7 @@ class MainWindow(QMainWindow):
         self._render_queue_tables()
         self._refresh_carrier_candidate_counts()
         self.review_task_button.setEnabled(bool(self._queue_items) and not self._is_running)
+        self.clear_task_button.setEnabled(bool(self._queue_items) and not self._is_running)
         self._update_selected_item()
         self._update_workspace_selection()
 
@@ -1725,7 +1871,7 @@ class MainWindow(QMainWindow):
             ),
             (
                 self.workspace_table,
-                self._queue_items,
+                self._workspace_visible_items(),
                 self._workspace_page,
                 self.workspace_page_label,
                 self.workspace_prev_button,
@@ -1770,7 +1916,8 @@ class MainWindow(QMainWindow):
                         item.carrier_key,
                         item.outbound_at_utc.isoformat(timespec="minutes"),
                         "已核验" if checked else "待核验",
-                        self._status_text(item.status.value),
+                        f"{age_minutes} 分",
+                        self._item_result_text(item),
                     )
                 for column, value in enumerate(values):
                     cell = QTableWidgetItem(value)
@@ -1786,6 +1933,10 @@ class MainWindow(QMainWindow):
             )
             previous.setEnabled(page > 0)
             following.setEnabled(page + 1 < page_count)
+        visible_ids = self.visible_workspace_item_ids()
+        if visible_ids != self._last_visible_workspace_ids:
+            self._last_visible_workspace_ids = visible_ids
+            self.visible_queue_items_changed.emit(visible_ids)
 
     def set_import_status(self, text: str) -> None:
         self.preview_status_label.setText(text)
@@ -1873,6 +2024,28 @@ class MainWindow(QMainWindow):
         )
         self.preview_status_label.setText(preview_text)
 
+    def _confirm_clear_task(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "清空任务",
+            "清空当前任务？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.clear_task_requested.emit()
+
+    def clear_import_preview(self) -> None:
+        self._current_preview = None
+        self._awaiting_rows = []
+        self._excluded_rows = ()
+        self.candidate_search_edit.clear()
+        self.set_import_counts(rows=0, eligible=0, excluded=0, duplicates=0)
+        self.set_queue_items([])
+        self.preview_export_button.setEnabled(False)
+        self.preview_status_label.setText("")
+        self.set_current_task("")
+
     def set_excluded_rows(self, rows: Iterable[object]) -> None:
         self._excluded_rows = tuple(rows)
 
@@ -1886,7 +2059,6 @@ class MainWindow(QMainWindow):
         task_ready: bool,
         physical_checks_complete: bool,
         unresolved_count: int,
-        mode: DeviceMode,
         real_mode_authorized: bool,
     ) -> None:
         self.set_start_conditions(
@@ -1894,20 +2066,40 @@ class MainWindow(QMainWindow):
             task_ready=task_ready,
             physical_checks_complete=physical_checks_complete,
             unresolved_count=unresolved_count,
-            mode=mode,
             real_mode_authorized=real_mode_authorized,
         )
 
-    def set_activity_rows(self, rows: Iterable[Iterable[str]]) -> None:
-        materialized = [tuple(str(value) for value in row) for row in rows]
-        self.activity_table.setRowCount(len(materialized))
-        for row, values in enumerate(materialized):
-            for column, value in enumerate(values[: self.activity_table.columnCount()]):
-                self.activity_table.setItem(row, column, QTableWidgetItem(value))
-        self.activity_log_label.setText(f"{len(materialized)} 条")
+    def set_activity_rows(self, rows: Iterable[tuple[str, str, str]]) -> None:
+        lines = [f"{at}  [{level}]  {message}" for at, level, message in rows]
+        self.activity_log_label.setText(f"{len(lines)} 条")
+        content = "\n".join(lines)
+        console = self.activity_console
+        if console.toPlainText() == content:
+            return
+        vertical = console.verticalScrollBar()
+        horizontal = console.horizontalScrollBar()
+        position = vertical.value()
+        horizontal_position = horizontal.value()
+        following = position == vertical.maximum()
+        console.setPlainText(content)
+        vertical.setValue(vertical.maximum() if following else position)
+        horizontal.setValue(horizontal_position)
 
-    def set_current_task(self, name: str) -> None:
+    def set_current_task(self, name: str, state: TaskState | None = None) -> None:
         self.workspace_task_label.setText(name or "未载入任务")
+        state_label = {
+            None: "无任务",
+            TaskState.DRAFT: "草稿",
+            TaskState.READY: "待启动",
+            TaskState.RUNNING: "扫描中",
+            TaskState.PAUSING: "暂停中",
+            TaskState.PAUSED: "已暂停",
+            TaskState.BLOCKED: "已阻止",
+            TaskState.COMPLETED: "已完成",
+            TaskState.STOPPED: "已停止",
+        }[state]
+        self.workspace_task_state_label.setText(f"任务状态：{state_label}")
+        self.start_button.setText("继续任务" if state is TaskState.PAUSED else "开始实扫")
 
     def set_bag_mapping(self, carrier: str, sort_code: str, container_no: str) -> None:
         self.bag_mapping_label.setText(f"{carrier} / {sort_code}")
@@ -1972,6 +2164,13 @@ class MainWindow(QMainWindow):
                     else:
                         value = "启用" if value else "停用"
                 self.carrier_table.setItem(row, column, QTableWidgetItem(str(value)))
+            if record.get("pending"):
+                verification = "—"
+            else:
+                verification = CONTAINER_VERIFICATION_LABELS.get(
+                    str(record.get("verification", "")), "未验证"
+                )
+            self.carrier_table.setItem(row, 6, QTableWidgetItem(verification))
 
     def set_diagnostics(self, results: Mapping[str, str]) -> None:
         for key, value in results.items():

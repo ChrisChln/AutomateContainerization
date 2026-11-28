@@ -38,12 +38,14 @@ class BlockingContainerController:
         self.warehouse = warehouse
         self.invalidated = False
 
-    def verify_current_or_open_bag(self, config: CarrierConfig) -> VerifiedSession:
+    def verify_current_or_open_bag(
+        self, config: CarrierConfig, *, unresolved_submissions: int | None = None
+    ) -> VerifiedSession:
         self.started.set()
         if not self.release.wait(timeout=5):
             raise TimeoutError("test did not release container verification")
         return VerifiedSession(
-            serial="SIMULATED-PDA" if getattr(self.adapter, "is_simulated", False) else "SYN-PDA",
+            serial="SYN-PDA",
             warehouse=self.warehouse,
             container_no=config.container_no,
             sort_code=config.sort_code,
@@ -63,36 +65,6 @@ def app() -> QApplication:
     return instance
 
 
-@pytest.mark.parametrize(
-    ("start_mode", "requested_mode"),
-    [
-        (DeviceMode.SIMULATED, DeviceMode.REAL),
-        (DeviceMode.REAL, DeviceMode.SIMULATED),
-    ],
-)
-def test_mode_change_is_rejected_during_container_verification(
-    app: QApplication,
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-    start_mode: DeviceMode,
-    requested_mode: DeviceMode,
-) -> None:
-    controller, window, _blocking_controllers, started, release = _start_verification(
-        app,
-        tmp_path,
-        monkeypatch,
-        start_mode,
-    )
-    try:
-        assert started.wait(timeout=2)
-
-        controller.set_mode(requested_mode)
-
-        assert controller.mode is start_mode
-    finally:
-        _finish(app, controller, window, release)
-
-
 def test_stale_container_verification_callback_does_not_replace_current_controller(
     app: QApplication,
     tmp_path,
@@ -102,7 +74,6 @@ def test_stale_container_verification_callback_does_not_replace_current_controll
         app,
         tmp_path,
         monkeypatch,
-        DeviceMode.SIMULATED,
     )
     try:
         assert started.wait(timeout=2)
@@ -128,7 +99,6 @@ def test_device_config_and_settings_actions_are_rejected_while_verifying(
         app,
         tmp_path,
         monkeypatch,
-        DeviceMode.SIMULATED,
     )
     errors: list[str] = []
     controller._show_error = errors.append  # type: ignore[method-assign]
@@ -142,7 +112,7 @@ def test_device_config_and_settings_actions_are_rejected_while_verifying(
     )
     original_configs = controller.repository.list_carrier_configs()
     original_settings = dict(controller.settings)
-    item, session = _create_ready_simulated_item(controller)
+    item, session = _create_ready_item(controller)
     controller.current_task_id = item.task_id
     controller.verified_session = session
     controller.wms_controller = controller.wms_controller or _blocking_controllers[0]
@@ -152,19 +122,13 @@ def test_device_config_and_settings_actions_are_rejected_while_verifying(
         "start_task",
         lambda *_args, **_kwargs: task_starts.append(True),
     )
-    session_preparations: list[bool] = []
-    monkeypatch.setattr(
-        controller,
-        "_prepare_simulated_session",
-        lambda *_args: session_preparations.append(True) or session,
-    )
     try:
         assert started.wait(timeout=2)
 
         controller._review_task()
         controller._start_task()
         controller._refresh_devices()
-        controller._connect_device("SIMULATED-PDA")
+        controller._connect_device("SYN-PDA")
         controller._verify_container("CARRIER-SYNTHETIC")
         controller._save_carrier_config(
             {
@@ -182,52 +146,23 @@ def test_device_config_and_settings_actions_are_rejected_while_verifying(
         assert controller.repository.list_carrier_configs() == original_configs
         assert controller.settings == original_settings
         assert task_starts == []
-        assert session_preparations == []
         assert len(errors) == 7
     finally:
         _finish(app, controller, window, release)
-
-
-def test_simulated_device_refresh_reports_current_verified_session(
-    app: QApplication, tmp_path
-) -> None:
-    window = MainWindow()
-    controller = AppController(window, data_dir=tmp_path / "refresh", poll_interval_ms=60_000)
-    controller._poll_timer.stop()
-    controller.verified_session = VerifiedSession(
-        serial="SIMULATED-PDA",
-        warehouse="SIMULATED-WAREHOUSE",
-        container_no="BAG-SYNTHETIC",
-        sort_code="SORT-SYNTHETIC",
-        session_id="SESSION-SYNTHETIC",
-        verified_at_utc=datetime.now(UTC),
-    )
-    try:
-        controller._refresh_devices()
-
-        assert window.warehouse_status_label.text() == "SIMULATED-WAREHOUSE"
-        assert window.container_status_label.text() == "BAG-SYNTHETIC"
-        assert window.session_status_label.text() == "会话有效"
-    finally:
-        controller.close()
-        _close_window(app, window)
 
 
 def _start_verification(
     app: QApplication,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
-    mode: DeviceMode,
 ):
     window = MainWindow()
-    controller = AppController(window, data_dir=tmp_path / mode.value, poll_interval_ms=60_000)
+    controller = AppController(window, data_dir=tmp_path / "real", poll_interval_ms=60_000)
     controller._poll_timer.stop()
-    if mode is DeviceMode.REAL:
-        controller.set_mode(DeviceMode.REAL)
-        controller.settings["warehouse"] = "SYN-WAREHOUSE"
-        controller.real_mode_authorized = True
-        controller._connected = True
-        controller._controller_invalidated = True
+    controller.settings["warehouse"] = "SYN-WAREHOUSE"
+    controller.real_mode_authorized = True
+    controller._connected = True
+    controller._controller_invalidated = True
 
     config = CarrierConfig(
         carrier_key="CARRIER-SYNTHETIC",
@@ -264,7 +199,7 @@ def _start_verification(
     return controller, window, blocking_controllers, started, release
 
 
-def _create_ready_simulated_item(controller: AppController) -> tuple[QueueItem, VerifiedSession]:
+def _create_ready_item(controller: AppController) -> tuple[QueueItem, VerifiedSession]:
     now = datetime.now(UTC)
     item = QueueItem(
         id="item-synthetic",
@@ -284,7 +219,7 @@ def _create_ready_simulated_item(controller: AppController) -> tuple[QueueItem, 
         counts=TaskCounts.from_statuses([ItemStatus.WAIT_PHYSICAL]),
         created_at_utc=now,
         updated_at_utc=now,
-        device_mode=DeviceMode.SIMULATED,
+        device_mode=DeviceMode.REAL,
     )
     controller.repository.create_task(task, [item])
     check = controller.physical_check_service.record_manual(
@@ -295,8 +230,8 @@ def _create_ready_simulated_item(controller: AppController) -> tuple[QueueItem, 
     )
     controller.repository.record_physical_check(check, actor="operator-synthetic")
     session = VerifiedSession(
-        serial="SIMULATED-PDA",
-        warehouse="SIMULATED-WAREHOUSE",
+        serial="SYN-PDA",
+        warehouse="SYN-WAREHOUSE",
         container_no=item.container_no,
         sort_code=item.sort_code,
         session_id="SESSION-READY-SYNTHETIC",
@@ -328,3 +263,110 @@ def _close_window(app: QApplication, window: MainWindow) -> None:
     window.deleteLater()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
+
+
+def test_new_controller_does_not_switch_from_stale_app_session(
+    app: QApplication,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = MainWindow()
+    controller = AppController(window, data_dir=tmp_path / "real", poll_interval_ms=60_000)
+    controller._poll_timer.stop()
+    controller.settings["warehouse"] = "SYN-WAREHOUSE"
+    controller.real_mode_authorized = True
+    controller._connected = True
+    controller._controller_invalidated = True
+    controller.verified_session = VerifiedSession(
+        serial="SYN-PDA",
+        warehouse="SYN-WAREHOUSE",
+        container_no="OLD-BAG",
+        sort_code="OLD-SORT",
+        session_id="SESSION-OLD",
+        verified_at_utc=datetime.now(UTC),
+    )
+    config = CarrierConfig(
+        carrier_key="CARRIER-SYNTHETIC",
+        display_name="Synthetic carrier",
+        aliases=(),
+        sort_code="SORT-SYNTHETIC",
+        container_no="BAG-SYNTHETIC",
+        enabled=True,
+        version=1,
+        updated_at_utc=datetime.now(UTC),
+    )
+    controller.repository.save_carrier_configs([config], actor="operator-synthetic")
+    window.carrier_key_edit.setText(config.carrier_key)
+    window.sort_code_edit.setText(config.sort_code)
+    window.container_edit.setText(config.container_no)
+    started = Event()
+    release = Event()
+    release.set()
+    switch_calls: list[bool] = []
+
+    def create_controller(adapter, *, warehouse: str, real_submission_authorized: bool = False):
+        result = BlockingContainerController(
+            adapter, started, release, authorized=real_submission_authorized, warehouse=warehouse
+        )
+        result.switch_bag = lambda *_a, **_k: switch_calls.append(True)  # type: ignore[attr-defined]
+        return result
+
+    monkeypatch.setattr(controller, "_new_wms_controller", create_controller)
+    try:
+        controller._verify_container(config.carrier_key)
+        assert started.wait(timeout=2)
+        assert switch_calls == []
+    finally:
+        _finish(app, controller, window, release)
+
+
+def test_controller_without_session_verifies_instead_of_switching(
+    app: QApplication,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = MainWindow()
+    controller = AppController(window, data_dir=tmp_path / "real", poll_interval_ms=60_000)
+    controller._poll_timer.stop()
+    controller.settings["warehouse"] = "SYN-WAREHOUSE"
+    controller.real_mode_authorized = True
+    controller._connected = True
+    controller._controller_invalidated = False
+    started = Event()
+    release = Event()
+    release.set()
+    switch_calls: list[bool] = []
+    wms = BlockingContainerController(
+        controller.adapter, started, release, authorized=True, warehouse="SYN-WAREHOUSE"
+    )
+    wms.active_session = None  # type: ignore[attr-defined]
+    wms.switch_bag = lambda *_a, **_k: switch_calls.append(True)  # type: ignore[attr-defined]
+    controller.wms_controller = wms  # type: ignore[assignment]
+    controller.verified_session = VerifiedSession(
+        serial="SYN-PDA",
+        warehouse="SYN-WAREHOUSE",
+        container_no="OLD-BAG",
+        sort_code="OLD-SORT",
+        session_id="SESSION-OLD",
+        verified_at_utc=datetime.now(UTC),
+    )
+    config = CarrierConfig(
+        carrier_key="CARRIER-SYNTHETIC",
+        display_name="Synthetic carrier",
+        aliases=(),
+        sort_code="SORT-SYNTHETIC",
+        container_no="BAG-SYNTHETIC",
+        enabled=True,
+        version=1,
+        updated_at_utc=datetime.now(UTC),
+    )
+    controller.repository.save_carrier_configs([config], actor="operator-synthetic")
+    window.carrier_key_edit.setText(config.carrier_key)
+    window.sort_code_edit.setText(config.sort_code)
+    window.container_edit.setText(config.container_no)
+    try:
+        controller._verify_container(config.carrier_key)
+        assert started.wait(timeout=2)
+        assert switch_calls == []
+    finally:
+        _finish(app, controller, window, release)

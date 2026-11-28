@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -204,7 +205,8 @@ def test_process_crash_during_duplicate_recovery_blocks_without_repeating_action
     assert controller.recovery_calls == 1
 
 
-def test_restart_pauses_safely_when_crash_happens_before_attempt_creation(tmp_path) -> None:
+@pytest.mark.parametrize("initial_state", [TaskState.RUNNING, TaskState.PAUSED, TaskState.BLOCKED])
+def test_restart_keeps_task_resumable_with_work_remaining(tmp_path, initial_state) -> None:
     now = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
     db_path = tmp_path / "scanner.sqlite3"
     repository = TaskRepository(db_path)
@@ -221,14 +223,21 @@ def test_restart_pauses_safely_when_crash_happens_before_attempt_creation(tmp_pa
     task = TaskSnapshot(
         id="task-synthetic",
         name="Synthetic task",
-        state=TaskState.RUNNING,
-        item_ids=(item.id,),
-        counts=TaskCounts.from_statuses([item.status]),
+        state=initial_state,
+        item_ids=(item.id, "review-item"),
+        counts=TaskCounts.from_statuses([item.status, ItemStatus.UNKNOWN]),
         created_at_utc=now,
         updated_at_utc=now,
         device_mode=DeviceMode.SIMULATED,
     )
-    repository.create_task(task, [item])
+    review_item = replace(
+        item,
+        id="review-item",
+        tracking="REVIEW-SYNTHETIC",
+        source_row_numbers=(3,),
+        status=ItemStatus.UNKNOWN,
+    )
+    repository.create_task(task, [item, review_item])
     repository.record_physical_check(
         PhysicalCheck(
             id="check-synthetic",
@@ -249,7 +258,8 @@ def test_restart_pauses_safely_when_crash_happens_before_attempt_creation(tmp_pa
         session_id="SESSION-SYNTHETIC",
         verified_at_utc=now,
     )
-    repository.record_session_verified(item.id, session)
+    if initial_state is TaskState.RUNNING:
+        repository.record_session_verified(item.id, session)
     repository.close()
 
     reopened = TaskRepository(db_path)
@@ -258,5 +268,6 @@ def test_restart_pauses_safely_when_crash_happens_before_attempt_creation(tmp_pa
     assert recovered.unknown_attempt_ids == ()
     assert reopened.statistics(task.id)["attempts"] == 0
     assert reopened.get_item(item.id).status is ItemStatus.READY
+    assert reopened.get_item(review_item.id).status is ItemStatus.UNKNOWN
     assert reopened.get_task(task.id).state is TaskState.PAUSED
-    assert reopened.events(task_id=task.id)[-1]["event_type"] == "startup_task_paused"
+    assert recovered.blocked_task_ids == ()

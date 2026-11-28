@@ -1,0 +1,573 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+
+<hierarchy rotation="0">
+
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,0][480,800]" drawing-order="0" hint="" display-id="0">
+
+    <node index="0" text="" resource-id="" class="android.widget.LinearLayout" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,0][480,728]" drawing-order="1" hint="" display-id="0">
+
+      <node index="0" text="" resource-id="android:id/content" class="android.widget.FrameLayout" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,0][480,728]" drawing-order="2" hint="" display-id="0">
+
+        <node index="0" text="" resource-id="com.ss.android.pda:id/root_layout" class="android.widget.LinearLayout" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,0][480,728]" drawing-order="1" hint="" display-id="0">
+
+          <node index="0" text="" resource-id="com.ss.android.pda:id/middle_layout" class="android.widget.LinearLayout" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,36][480,432]" drawing-order="1" hint="" display-id="0">
+
+            <node index="1" text="" resource-id="com.ss.android.pda:id/activity_container" class="android.widget.FrameLayout" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,36][480,432]" drawing-order="3" hint="" display-id="0">
+
+              <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,36][480,432]" drawing-order="1" hint="" display-id="0">
+
+                <node index="0" text="" resource-id="" class="android.webkit.WebView" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,36][480,432]" drawing-order="0" hint="" display-id="0">
+
+                  <node index="0" text="" resource-id="" class="android.webkit.WebView" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,36][480,432]" drawing-order="0" hint="" display-id="0">
+
+                    <node index="0" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,36][480,432]" drawing-order="0" hint="" display-id="0">
+
+                      <node index="0" text="" resource-id="global-wms-i18n-pda-root" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,36][480,432]" drawing-order="0" hint="" display-id="0">
+
+                        <node index="0" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,36][480,96]" drawing-order="0" hint="" display-id="0">
+
+                          <node index="0" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,36][480,96]" drawing-order="0" hint="" display-id="0">
+
+                            <node index="0" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,36][75,96]" drawing-order="0" hint="" display-id="0">
+
+                              <node index="0" text="" resource-id="" class="android.widget.Image" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[15,45][58,87]" drawing-order="0" hint="" display-id="0" />
+
+                            </node>
+
+                            <node index="1" text="混合排序" resource-id="" class="android.widget.TextView" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[57,43][178,88]" drawing-order="0" hint="" display-id="0" />
+
+                            <node index="2" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[405,36][480,96]" drawing-order="0" hint="" display-id="0">
+
+                              <node index="0" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[421,42][465,90]" drawing-order="0" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="" class="android.widget.Image" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[421,42][465,85]" drawing-order="0" hint="" display-id="0" />
+
+                              </node>
+
+                            </node>
+
+                          </node>
+
+                        </node>
+
+                        <node index="1" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="true" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,96][480,328]" drawing-order="0" hint="" display-id="0">
+
+                          <node index="0" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,168][480,328]" drawing-order="0" hint="" display-id="0">
+
+                            <node index="0" text="index" resource-id="" class="android.widget.Image" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[169,187][310,328]" drawing-order="0" hint="" display-id="0" />
+
+                            <node index="1" text="SORT_TEST_01" resource-id="" class="android.widget.TextView" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[34,339][445,381]" drawing-order="0" hint="" display-id="0" />
+
+                            <node index="2" text="排序码" resource-id="" class="android.widget.TextView" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[34,378][445,414]" drawing-order="0" hint="" display-id="0" />
+
+                          </node>
+
+                        </node>
+
+                        <node index="2" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[15,339][465,420]" drawing-order="0" hint="" display-id="0">
+
+                          <node index="0" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[15,339][465,420]" drawing-order="0" hint="" display-id="0">
+
+                            <node index="0" text="" resource-id="" class="android.widget.TextView" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[16,340][463,420]" drawing-order="0" hint="" display-id="0" />
+
+                            <node index="1" text="" resource-id="" class="android.widget.SearchView" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[16,340][463,418]" drawing-order="0" hint="" display-id="0">
+
+                              <node index="0" text="" resource-id="" class="android.view.View" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[18,342][462,417]" drawing-order="0" hint="" display-id="0">
+
+                                <node NAF="true" index="0" text="" resource-id="" class="android.widget.EditText" package="com.ss.android.pda" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="true" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[34,342][445,417]" drawing-order="0" hint="" display-id="0" />
+
+                              </node>
+
+                            </node>
+
+                          </node>
+
+                        </node>
+
+                      </node>
+
+                    </node>
+
+                  </node>
+
+                </node>
+
+              </node>
+
+            </node>
+
+          </node>
+
+        </node>
+
+      </node>
+
+    </node>
+
+  </node>
+
+  <node index="0" text="" resource-id="com.android.systemui:id/navigation_bar_frame" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,728][480,800]" drawing-order="0" hint="" display-id="0">
+
+    <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,728][480,800]" drawing-order="1" hint="" display-id="0">
+
+      <node index="0" text="" resource-id="com.android.systemui:id/navigation_inflater" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,728][480,800]" drawing-order="3" hint="" display-id="0">
+
+        <node index="0" text="" resource-id="com.android.systemui:id/horizontal" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,728][480,800]" drawing-order="1" hint="" display-id="0">
+
+          <node index="0" text="" resource-id="com.android.systemui:id/nav_buttons" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,728][480,800]" drawing-order="1" hint="" display-id="0">
+
+            <node index="0" text="" resource-id="com.android.systemui:id/ends_group" class="android.widget.LinearLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,728][480,800]" drawing-order="1" hint="" display-id="0">
+
+              <node index="0" text="" resource-id="" class="android.widget.RelativeLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,728][60,800]" drawing-order="1" hint="" display-id="0" />
+
+              <node index="1" text="" resource-id="" class="android.widget.RelativeLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[60,728][180,800]" drawing-order="2" hint="" display-id="0">
+
+                <node index="0" text="" resource-id="com.android.systemui:id/back" class="android.widget.ImageView" package="com.android.systemui" content-desc="返回" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[67,728][172,800]" drawing-order="1" hint="" display-id="0" />
+
+              </node>
+
+              <node index="2" text="" resource-id="" class="android.widget.RelativeLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[300,728][420,800]" drawing-order="4" hint="" display-id="0">
+
+                <node index="0" text="" resource-id="com.android.systemui:id/recent_apps" class="android.widget.ImageView" package="com.android.systemui" content-desc="概览" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[307,728][412,800]" drawing-order="1" hint="" display-id="0" />
+
+              </node>
+
+              <node index="3" text="" resource-id="" class="android.widget.RelativeLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[420,728][480,800]" drawing-order="5" hint="" display-id="0">
+
+                <node index="0" text="" resource-id="com.android.systemui:id/menu_container" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[420,728][480,800]" drawing-order="1" hint="" display-id="0">
+
+                  <node index="0" text="" resource-id="com.android.systemui:id/ime_switcher" class="android.widget.ImageView" package="com.android.systemui" content-desc="切换输入法" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[420,728][480,800]" drawing-order="2" hint="" display-id="0" />
+
+                </node>
+
+              </node>
+
+            </node>
+
+            <node index="1" text="" resource-id="com.android.systemui:id/center_group" class="android.widget.LinearLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[187,728][292,800]" drawing-order="2" hint="" display-id="0">
+
+              <node index="0" text="" resource-id="com.android.systemui:id/home" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[187,728][292,800]" drawing-order="1" hint="" display-id="0">
+
+                <node index="0" text="" resource-id="com.android.systemui:id/home_button" class="android.widget.ImageView" package="com.android.systemui" content-desc="主屏幕" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[187,728][292,800]" drawing-order="5" hint="" display-id="0" />
+
+                <node index="1" text="" resource-id="" class="android.widget.RelativeLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[187,728][292,800]" drawing-order="1" hint="" display-id="0" />
+
+                <node index="2" text="" resource-id="com.android.systemui:id/halo" class="android.widget.ImageView" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[223,747][256,780]" drawing-order="2" hint="" display-id="0" />
+
+                <node index="3" text="" resource-id="com.android.systemui:id/white_cutout" class="android.widget.ImageView" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[223,747][256,780]" drawing-order="3" hint="" display-id="0" />
+
+                <node index="4" text="" resource-id="com.android.systemui:id/white" class="android.widget.ImageView" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[223,747][256,780]" drawing-order="4" hint="" display-id="0" />
+
+              </node>
+
+            </node>
+
+          </node>
+
+        </node>
+
+      </node>
+
+    </node>
+
+  </node>
+
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,0][480,36]" drawing-order="0" hint="" display-id="0">
+
+    <node index="0" text="" resource-id="com.android.systemui:id/status_bar_container" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,0][480,36]" drawing-order="1" hint="" display-id="0">
+
+      <node index="0" text="" resource-id="com.android.systemui:id/status_bar" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,0][480,36]" drawing-order="1" hint="" display-id="0">
+
+        <node index="0" text="" resource-id="com.android.systemui:id/status_bar_contents" class="android.widget.LinearLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,0][480,36]" drawing-order="2" hint="" display-id="0">
+
+          <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[12,0][240,36]" drawing-order="1" hint="" display-id="0">
+
+            <node index="0" text="" resource-id="com.android.systemui:id/status_bar_left_side" class="android.widget.LinearLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[12,0][240,36]" drawing-order="2" hint="" display-id="0">
+
+              <node index="0" text="下午5:05" resource-id="com.android.systemui:id/clock" class="android.widget.TextView" package="com.android.systemui" content-desc="下午5:05" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[12,0][93,36]" drawing-order="2" hint="" display-id="0" />
+
+              <node index="1" text="" resource-id="com.android.systemui:id/notification_icon_area" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[93,0][240,36]" drawing-order="3" hint="" display-id="0">
+
+                <node index="0" text="" resource-id="com.android.systemui:id/notification_icon_area_inner" class="android.widget.LinearLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[93,0][240,36]" drawing-order="1" hint="" display-id="0">
+
+                  <node index="0" text="" resource-id="com.android.systemui:id/notificationIcons" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[93,0][240,36]" drawing-order="1" hint="" display-id="0">
+
+                    <node index="0" text="" resource-id="" class="android.widget.ImageView" package="com.android.systemui" content-desc="Android 系统通知：已连接到 USB 调试" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[93,0][126,36]" drawing-order="1" hint="" display-id="0" />
+
+                  </node>
+
+                </node>
+
+              </node>
+
+            </node>
+
+          </node>
+
+          <node index="1" text="" resource-id="com.android.systemui:id/system_icon_area" class="android.widget.LinearLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[240,0][468,36]" drawing-order="4" hint="" display-id="0">
+
+            <node index="0" text="" resource-id="com.android.systemui:id/system_icons" class="android.widget.LinearLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[240,0][468,36]" drawing-order="1" hint="" display-id="0">
+
+              <node index="0" text="" resource-id="com.android.systemui:id/statusIcons" class="android.widget.LinearLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[240,0][456,36]" drawing-order="1" hint="" display-id="0">
+
+                <node index="0" text="" resource-id="" class="android.widget.ImageView" package="com.android.systemui" content-desc="Opened" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[302,1][326,34]" drawing-order="1" hint="" display-id="0" />
+
+                <node index="1" text="" resource-id="" class="android.widget.ImageView" package="com.android.systemui" content-desc="fn function" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[326,1][350,34]" drawing-order="3" hint="" display-id="0" />
+
+                <node index="2" text="" resource-id="" class="android.widget.ImageView" package="com.android.systemui" content-desc="key shift" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[350,1][374,34]" drawing-order="5" hint="" display-id="0" />
+
+                <node index="3" text="" resource-id="" class="android.widget.ImageView" package="com.android.systemui" content-desc="蓝牙开启。" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[374,1][410,34]" drawing-order="13" hint="" display-id="0" />
+
+                <node index="4" text="" resource-id="com.android.systemui:id/wifi_combo" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="WLAN 信号强度为三格。" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[410,1][447,34]" drawing-order="17" hint="" display-id="0">
+
+                  <node index="0" text="" resource-id="com.android.systemui:id/wifi_group" class="android.widget.LinearLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[414,1][447,34]" drawing-order="1" hint="" display-id="0">
+
+                    <node index="0" text="" resource-id="com.android.systemui:id/inout_container" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[414,4][424,30]" drawing-order="1" hint="" display-id="0">
+
+                      <node index="0" text="" resource-id="com.android.systemui:id/wifi_in" class="android.widget.ImageView" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[414,4][424,27]" drawing-order="1" hint="" display-id="0" />
+
+                      <node index="1" text="" resource-id="com.android.systemui:id/wifi_out" class="android.widget.ImageView" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[414,4][424,27]" drawing-order="2" hint="" display-id="0" />
+
+                    </node>
+
+                    <node index="1" text="" resource-id="com.android.systemui:id/wifi_combo" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[424,6][447,29]" drawing-order="2" hint="" display-id="0">
+
+                      <node index="0" text="" resource-id="com.android.systemui:id/wifi_signal" class="android.widget.ImageView" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[424,6][447,29]" drawing-order="1" hint="" display-id="0" />
+
+                    </node>
+
+                  </node>
+
+                </node>
+
+              </node>
+
+              <node index="1" text="" resource-id="com.android.systemui:id/battery" class="android.widget.LinearLayout" package="com.android.systemui" content-desc="正在充电，已完成 100%。" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[456,0][468,36]" drawing-order="3" hint="" display-id="0">
+
+                <node index="0" text="" resource-id="" class="android.widget.ImageView" package="com.android.systemui" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[456,7][468,27]" drawing-order="2" hint="" display-id="0" />
+
+              </node>
+
+            </node>
+
+          </node>
+
+        </node>
+
+      </node>
+
+    </node>
+
+  </node>
+
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="0" hint="" display-id="0">
+
+    <node index="0" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="1" hint="" display-id="0">
+
+      <node index="0" text="" resource-id="android:id/content" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="2" hint="" display-id="0">
+
+        <node index="0" text="" resource-id="android:id/parentPanel" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="1" hint="" display-id="0">
+
+          <node index="1" text="" resource-id="android:id/inputArea" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="2" hint="" display-id="0">
+
+            <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="true" focused="true" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="1" hint="" display-id="0">
+
+              <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="1" hint="" display-id="0">
+
+                <node index="0" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="3" hint="" display-id="0">
+
+                  <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/keyboard_holder" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="1" hint="" display-id="0">
+
+                    <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="3" hint="" display-id="0">
+
+                      <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="1" hint="" display-id="0">
+
+                        <node index="0" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="1" hint="" display-id="0">
+
+                          <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/input_area" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[3,444][477,660]" drawing-order="1" hint="" display-id="0">
+
+                            <node index="0" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[3,444][477,516]" drawing-order="1" hint="" display-id="0">
+
+                              <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/D01" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="Q" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[3,444][50,516]" drawing-order="1" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="Q" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[6,444][47,501]" drawing-order="1" hint="" display-id="0" />
+
+                                <node index="1" text="1" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[36,444][47,463]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="1" text="" resource-id="com.google.android.inputmethod.latin:id/D02" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="W" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[50,444][97,516]" drawing-order="2" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="W" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[53,444][94,501]" drawing-order="1" hint="" display-id="0" />
+
+                                <node index="1" text="2" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[83,444][94,463]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="2" text="" resource-id="com.google.android.inputmethod.latin:id/D03" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="E" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[97,444][144,516]" drawing-order="3" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="E" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[100,444][141,501]" drawing-order="1" hint="" display-id="0" />
+
+                                <node index="1" text="3" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[130,444][141,463]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="3" text="" resource-id="com.google.android.inputmethod.latin:id/D04" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="R" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[144,444][191,516]" drawing-order="4" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="R" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[147,444][188,501]" drawing-order="1" hint="" display-id="0" />
+
+                                <node index="1" text="4" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[177,444][188,463]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="4" text="" resource-id="com.google.android.inputmethod.latin:id/D05" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="T" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[191,444][238,516]" drawing-order="5" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="T" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[194,444][235,501]" drawing-order="1" hint="" display-id="0" />
+
+                                <node index="1" text="5" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[224,444][235,463]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="5" text="" resource-id="com.google.android.inputmethod.latin:id/D06" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="Y" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[238,444][285,516]" drawing-order="7" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="Y" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[241,444][282,501]" drawing-order="1" hint="" display-id="0" />
+
+                                <node index="1" text="6" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[271,444][282,463]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="6" text="" resource-id="com.google.android.inputmethod.latin:id/D07" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="U" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[285,444][333,516]" drawing-order="8" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="U" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[288,444][330,501]" drawing-order="1" hint="" display-id="0" />
+
+                                <node index="1" text="7" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[319,444][330,463]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="7" text="" resource-id="com.google.android.inputmethod.latin:id/D08" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="I" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[333,444][381,516]" drawing-order="9" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="I" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[336,444][378,501]" drawing-order="1" hint="" display-id="0" />
+
+                                <node index="1" text="8" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[367,444][378,463]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="8" text="" resource-id="com.google.android.inputmethod.latin:id/D09" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="O" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[381,444][429,516]" drawing-order="10" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="O" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[384,444][426,501]" drawing-order="1" hint="" display-id="0" />
+
+                                <node index="1" text="9" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[415,444][426,463]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="9" text="" resource-id="com.google.android.inputmethod.latin:id/D10" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="P" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[429,444][477,516]" drawing-order="11" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="P" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[432,444][474,501]" drawing-order="1" hint="" display-id="0" />
+
+                                <node index="1" text="0" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[463,444][474,463]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                            </node>
+
+                            <node index="1" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[3,516][477,588]" drawing-order="2" hint="" display-id="0">
+
+                              <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/C01" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="A" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[3,516][74,588]" drawing-order="1" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[3,516][74,588]" drawing-order="1" hint="" display-id="0">
+
+                                  <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/host" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[27,516][74,588]" drawing-order="1" hint="" display-id="0">
+
+                                    <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="A" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[30,516][71,573]" drawing-order="1" hint="" display-id="0" />
+
+                                  </node>
+
+                                </node>
+
+                              </node>
+
+                              <node index="1" text="" resource-id="com.google.android.inputmethod.latin:id/C02" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="S" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[74,516][121,588]" drawing-order="2" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="S" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[77,516][118,573]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="2" text="" resource-id="com.google.android.inputmethod.latin:id/C03" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="D" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[121,516][168,588]" drawing-order="3" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="D" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[124,516][165,573]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="3" text="" resource-id="com.google.android.inputmethod.latin:id/C04" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="F" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[168,516][215,588]" drawing-order="4" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="F" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[171,516][212,573]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="4" text="" resource-id="com.google.android.inputmethod.latin:id/C05" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="G" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[215,516][262,588]" drawing-order="5" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="G" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[218,516][259,573]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="5" text="" resource-id="com.google.android.inputmethod.latin:id/C06" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="H" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[262,516][309,588]" drawing-order="7" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="H" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[265,516][306,573]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="6" text="" resource-id="com.google.android.inputmethod.latin:id/C07" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="J" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[309,516][357,588]" drawing-order="8" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="J" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[312,516][354,573]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="7" text="" resource-id="com.google.android.inputmethod.latin:id/C08" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="K" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[357,516][405,588]" drawing-order="9" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="K" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[360,516][402,573]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="8" text="" resource-id="com.google.android.inputmethod.latin:id/C09" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="L" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[405,516][477,588]" drawing-order="10" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[405,516][477,588]" drawing-order="1" hint="" display-id="0">
+
+                                  <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/host" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[405,516][453,588]" drawing-order="1" hint="" display-id="0">
+
+                                    <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="L" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[408,516][450,573]" drawing-order="1" hint="" display-id="0" />
+
+                                  </node>
+
+                                </node>
+
+                              </node>
+
+                            </node>
+
+                            <node index="2" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[3,588][477,660]" drawing-order="3" hint="" display-id="0">
+
+                              <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/key_pos_shift" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="Shift enabled" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[3,588][74,660]" drawing-order="1" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.ImageView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[20,598][56,634]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="1" text="" resource-id="com.google.android.inputmethod.latin:id/B01" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="Z" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[74,588][121,660]" drawing-order="2" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="Z" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[77,588][118,645]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="2" text="" resource-id="com.google.android.inputmethod.latin:id/B02" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="X" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[121,588][168,660]" drawing-order="3" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="X" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[124,588][165,645]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="3" text="" resource-id="com.google.android.inputmethod.latin:id/B03" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="C" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[168,588][215,660]" drawing-order="4" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="C" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[171,588][212,645]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="4" text="" resource-id="com.google.android.inputmethod.latin:id/B04" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="V" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[215,588][262,660]" drawing-order="5" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="V" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[218,588][259,645]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="5" text="" resource-id="com.google.android.inputmethod.latin:id/B05" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="B" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[262,588][309,660]" drawing-order="7" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="B" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[265,588][306,645]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="6" text="" resource-id="com.google.android.inputmethod.latin:id/B06" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="N" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[309,588][357,660]" drawing-order="8" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="N" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[312,588][354,645]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="7" text="" resource-id="com.google.android.inputmethod.latin:id/B07" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="M" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[357,588][405,660]" drawing-order="9" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="M" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[360,588][402,645]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                              <node index="8" text="" resource-id="com.google.android.inputmethod.latin:id/key_pos_del" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="Delete" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[405,588][477,660]" drawing-order="10" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.ImageView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[415,592][466,640]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                            </node>
+
+                          </node>
+
+                          <node index="1" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.LinearLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[3,660][477,728]" drawing-order="2" hint="" display-id="0">
+
+                            <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/key_pos_switch_to_symbol" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="Symbol keyboard" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[3,660][74,728]" drawing-order="1" hint="" display-id="0">
+
+                              <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="?123" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[13,671][63,702]" drawing-order="1" hint="" display-id="0" />
+
+                            </node>
+
+                            <node index="1" text="" resource-id="com.google.android.inputmethod.latin:id/key_pos_space" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="Space" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[74,660][405,728]" drawing-order="4" hint="" display-id="0">
+
+                              <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[77,660][402,713]" drawing-order="1" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.TextView" package="com.google.android.inputmethod.latin" content-desc="EN • ES" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[77,660][402,713]" drawing-order="1" hint="" display-id="0" />
+
+                              </node>
+
+                            </node>
+
+                            <node index="2" text="" resource-id="com.google.android.inputmethod.latin:id/key_pos_ime_action" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="Enter" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" visible-to-user="true" bounds="[405,660][477,728]" drawing-order="7" hint="" display-id="0">
+
+                              <node index="0" text="" resource-id="" class="android.view.ViewGroup" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[408,660][474,713]" drawing-order="1" hint="" display-id="0">
+
+                                <node index="0" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.ImageView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[419,664][464,709]" drawing-order="3" hint="" display-id="0" />
+
+                                <node index="1" text="" resource-id="" class="android.widget.ImageView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[438,683][445,690]" drawing-order="2" hint="" display-id="0" />
+
+                              </node>
+
+                            </node>
+
+                          </node>
+
+                        </node>
+
+                      </node>
+
+                    </node>
+
+                  </node>
+
+                </node>
+
+                <node index="1" text="" resource-id="com.google.android.inputmethod.latin:id/0_resource_name_obfuscated" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="2" hint="" display-id="0" />
+
+                <node index="2" text="" resource-id="" class="android.widget.FrameLayout" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,728]" drawing-order="4" hint="" display-id="0">
+
+                  <node index="0" text="" resource-id="" class="android.widget.ImageView" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,432][480,434]" drawing-order="1" hint="" display-id="0" />
+
+                </node>
+
+              </node>
+
+            </node>
+
+          </node>
+
+        </node>
+
+      </node>
+
+    </node>
+
+    <node index="1" text="" resource-id="android:id/navigationBarBackground" class="android.view.View" package="com.google.android.inputmethod.latin" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" visible-to-user="true" bounds="[0,728][480,800]" drawing-order="2" hint="" display-id="0" />
+
+  </node>
+
+</hierarchy>

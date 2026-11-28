@@ -313,3 +313,51 @@ def test_conflicting_logids_on_one_page_are_not_trusted() -> None:
 
     assert page.logid is None
     assert page.state is not PageState.DUPLICATE_DIALOG
+
+
+def test_open_failure_page_with_keyboard_is_recognised() -> None:
+    observation = observe("real_single_sort_open_failed.xml")
+
+    assert observation.state is PageState.SINGLE_OPEN_FAILED
+
+
+def test_duplicate_dialog_exposes_its_title_as_safe_tap_point() -> None:
+    observation = observe("real_single_sort_duplicate_dialog.xml")
+
+    assert observation.state is PageState.DUPLICATE_DIALOG
+    assert observation.safe_tap_point == (54, 306)
+
+
+def test_single_sort_page_exposes_title_as_safe_tap_point() -> None:
+    observation = observe("real_single_sort_bag_ready.xml")
+
+    assert observation.safe_tap_point == (64, 126)
+
+
+def test_inline_grouping_error_exposes_typed_tracking() -> None:
+    observation = observe("real_single_sort_grouping_inline.xml")
+
+    assert observation.grouping_inline_tracking == "TRACKING_TEST_009"
+    assert observation.state is PageState.UNKNOWN
+
+
+def test_bag_ready_page_has_no_inline_grouping_tracking() -> None:
+    assert observe("real_single_sort_bag_ready.xml").grouping_inline_tracking == ""
+
+
+def test_inline_duplicate_error_exposes_typed_tracking() -> None:
+    xml = (FIXTURES / "real_single_sort_grouping_inline.xml").read_text(encoding="utf-8").replace(
+        "状态异常，状态为组包中", "已扫描包裹已在当前大包中。"
+    )
+    page = StateDetector(target_package="com.ss.android.pda").detect(
+        XmlSnapshot(xml, datetime.now(UTC), package_name="com.ss.android.pda")
+    )
+
+    assert page.grouping_inline_tracking == "TRACKING_TEST_009"
+
+
+def test_home_with_inbound_section_expanded_is_home_with_scroll_area() -> None:
+    observation = observe("real_wms_home_inbound_expanded.xml")
+
+    assert observation.state is PageState.HOME
+    assert observation.scroll_area == (15, 303, 465, 728)

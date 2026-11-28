@@ -74,3 +74,39 @@ def test_connect_succeeds_when_uiautomator_client_has_no_app_info(monkeypatch) -
 
     assert info.app_version == ""
     assert info.authorized is True
+
+
+class _ScreenDevice:
+    def __init__(self, screen_on: bool) -> None:
+        self.info = {"screenOn": screen_on}
+        self.dumped = False
+
+    def dump_hierarchy(self, compressed: bool = False) -> str:
+        self.dumped = True
+        return "<hierarchy/>"
+
+    def app_current(self) -> dict[str, str]:
+        return {"package": "com.example.wms", "activity": "Main"}
+
+
+def _authorized(device: object) -> AdbDeviceAdapter:
+    adapter = AdbDeviceAdapter(package_name="com.example.wms", uiautomator_client=device)
+    adapter._authorized = True
+    return adapter
+
+
+def test_snapshot_reports_screen_off_without_reading_hierarchy() -> None:
+    import pytest
+
+    from tt_auto_bag_scanner.infrastructure.exception_handler import ScreenOffError
+
+    device = _ScreenDevice(screen_on=False)
+    with pytest.raises(ScreenOffError, match="屏幕已关闭"):
+        _authorized(device).snapshot_xml()
+    assert device.dumped is False
+
+
+def test_snapshot_reads_hierarchy_when_screen_on() -> None:
+    device = _ScreenDevice(screen_on=True)
+    snapshot = _authorized(device).snapshot_xml()
+    assert snapshot.package_name == "com.example.wms"

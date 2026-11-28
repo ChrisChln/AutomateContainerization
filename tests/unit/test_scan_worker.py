@@ -20,6 +20,7 @@ from tt_auto_bag_scanner.domain.models import (
     VerifiedSession,
 )
 from tt_auto_bag_scanner.infrastructure.repository import RepositoryError, TaskRepository
+from tt_auto_bag_scanner.infrastructure.wms_controller import ScanNotSent
 
 NOW = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
 
@@ -121,6 +122,48 @@ def make_repository(path, item_count=1, unchecked=()):
     return repository, item, checks[0] if checks else None, session
 
 
+@pytest.mark.parametrize(("action", "calls"), [("speed", 2), ("pause", 1), ("stop", 1)])
+def test_scan_interval_can_be_interrupted(tmp_path, monkeypatch, action, calls) -> None:
+    repository, item, _, session = make_repository(tmp_path / "scanner.sqlite3", item_count=2)
+    controller = InspectingController(repository)
+    worker = ScanWorker(
+        repository, item.task_id, controller, lambda _: session, scan_interval=(30, 30, "normal")
+    )
+    waiting = threading.Event()
+    original_wait = worker._interval_changed.wait
+
+    waits = []
+
+    def observe_wait(timeout):
+        waits.append(timeout)
+        waiting.set()
+        return original_wait(timeout)
+
+    monkeypatch.setattr(worker._interval_changed, "wait", observe_wait)
+    worker.start()
+    try:
+        assert waiting.wait(3)
+        assert controller.calls == 1
+        assert repository.list_items(item.task_id)[1].status is ItemStatus.READY
+        if action == "speed":
+            waiting.clear()
+            worker.set_scan_speed("fast")
+            assert waiting.wait(3)
+            assert len(waits) == 2
+            assert waits[1] == pytest.approx(30, abs=0.1)
+            worker.set_scan_speed("none")
+        elif action == "pause":
+            worker.request_pause()
+        else:
+            worker.request_stop()
+        assert worker.completed.wait(3)
+        assert worker.error is None
+        assert controller.calls == calls
+    finally:
+        worker.request_stop()
+        worker.join(3)
+
+
 def test_worker_persists_before_single_controller_call_and_finishes_success(tmp_path) -> None:
     repository, item, _, session = make_repository(tmp_path / "scanner.sqlite3")
     controller = InspectingController(repository)
@@ -132,6 +175,19 @@ def test_worker_persists_before_single_controller_call_and_finishes_success(tmp_
     assert controller.status_seen_at_submit is ItemStatus.IN_FLIGHT
     assert repository.get_item(item.id).status is ItemStatus.SUCCESS
     assert repository.get_task(item.task_id).state is TaskState.COMPLETED
+
+
+def test_worker_pauses_unsent_item_without_requiring_reconciliation(tmp_path) -> None:
+    repository, item, _, session = make_repository(tmp_path / "scanner.sqlite3")
+    controller = InspectingController(repository, exception=ScanNotSent("input focus changed"))
+    worker = ScanWorker(repository, item.task_id, controller, lambda _: session)
+
+    worker.run()
+
+    assert controller.calls == 1
+    assert repository.get_item(item.id).status is ItemStatus.READY
+    assert repository.get_task(item.task_id).state is TaskState.PAUSED
+    assert repository.latest_attempt(item.id)["outcome"] == "not_sent"
 
 
 def test_worker_converts_ambiguous_exception_to_unknown_and_never_retries(tmp_path) -> None:
@@ -350,3 +406,159 @@ def test_worker_skips_unverified_items_and_submits_verified_ones(tmp_path) -> No
     assert repository.get_item(first.id).status is ItemStatus.WAIT_PHYSICAL
     assert repository.get_item("item-synthetic-1").status is ItemStatus.SUCCESS
     assert repository.get_task(first.task_id).state is TaskState.PAUSED
+
+
+class SequenceController(InspectingController):
+    def __init__(self, repository, outcomes):
+        super().__init__(repository)
+        self.outcomes = list(outcomes)
+
+    def submit_once(self, item, session, physical_check, attempt_id):
+        self.outcome = self.outcomes[self.calls] if self.calls < len(self.outcomes) else (
+            ScanOutcome.SUCCESS
+        )
+        return super().submit_once(item, session, physical_check, attempt_id)
+
+
+def test_unknown_result_does_not_pause_and_next_item_is_scanned(tmp_path) -> None:
+    repository, item, _, session = make_repository(tmp_path / "scanner.sqlite3", item_count=3)
+    controller = SequenceController(repository, [ScanOutcome.UNKNOWN])
+    worker = ScanWorker(repository, item.task_id, controller, lambda _: session)
+
+    worker.run()
+
+    statuses = [current.status for current in repository.list_items(item.task_id)]
+    assert controller.calls == 3
+    assert statuses == [ItemStatus.UNKNOWN, ItemStatus.SUCCESS, ItemStatus.SUCCESS]
+    assert repository.get_task(item.task_id).state is TaskState.PAUSED
+
+
+def test_existing_unknown_item_is_skipped_not_retried(tmp_path) -> None:
+    repository, item, _, session = make_repository(tmp_path / "scanner.sqlite3", item_count=3)
+    first = SequenceController(repository, [ScanOutcome.UNKNOWN])
+    first_worker = ScanWorker(repository, item.task_id, first, lambda _: session)
+    first.after_submit = lambda _calls: first_worker.request_pause()
+    first_worker.run()
+    assert repository.get_task(item.task_id).state is TaskState.PAUSED
+    repository.transition_task(item.task_id, TaskState.RUNNING, actor="operator", reason="resume")
+    controller = SequenceController(repository, [])
+    worker = ScanWorker(repository, item.task_id, controller, lambda _: session)
+
+    worker.run()
+
+    statuses = [current.status for current in repository.list_items(item.task_id)]
+    assert controller.calls == 2
+    assert statuses == [ItemStatus.UNKNOWN, ItemStatus.SUCCESS, ItemStatus.SUCCESS]
+
+
+def test_three_unknown_results_in_a_row_block_the_task(tmp_path) -> None:
+    repository, item, _, session = make_repository(tmp_path / "scanner.sqlite3", item_count=4)
+    controller = SequenceController(repository, [ScanOutcome.UNKNOWN] * 4)
+    worker = ScanWorker(repository, item.task_id, controller, lambda _: session)
+
+    worker.run()
+
+    assert controller.calls == 3
+    assert repository.get_task(item.task_id).state is TaskState.BLOCKED
+
+
+def test_task_service_starts_a_paused_task_that_has_unknown_items(tmp_path) -> None:
+    repository, item, _, session = make_repository(tmp_path / "scanner.sqlite3", item_count=2)
+    first = SequenceController(repository, [ScanOutcome.UNKNOWN])
+    first_worker = ScanWorker(repository, item.task_id, first, lambda _: session)
+    first.after_submit = lambda _calls: first_worker.request_pause()
+    first_worker.run()
+    controller = SequenceController(repository, [])
+
+    worker = TaskService(repository).start_task(item.task_id, controller, lambda _: session)
+    worker.join(timeout=5)
+
+    assert controller.calls == 1
+    assert repository.get_item(item.id).status is ItemStatus.UNKNOWN
+
+
+def test_recovery_refused_before_typing_is_abandoned_and_task_continues(tmp_path) -> None:
+    from tt_auto_bag_scanner.infrastructure.wms_controller import SubmissionBlocked
+
+    repository, item, _, session = make_repository(tmp_path / "scanner.sqlite3", item_count=2)
+    controller = SequenceController(repository, [ScanOutcome.ALREADY_IN_BAG])
+    abandoned: list[bool] = []
+
+    def refuse(_result, _session):
+        raise SubmissionBlocked("duplicate evidence does not match the current dialog")
+
+    controller.recover_duplicate = refuse
+    controller.abandon_duplicate_recovery = lambda: abandoned.append(True)
+    worker = ScanWorker(repository, item.task_id, controller, lambda _: session)
+
+    worker.run()
+
+    statuses = [current.status for current in repository.list_items(item.task_id)]
+    assert statuses == [ItemStatus.ALREADY_IN_BAG, ItemStatus.SUCCESS]
+    assert abandoned == [True]
+    assert not repository.has_blocking_unresolved(item.task_id)
+    recovery = repository._connection().execute(
+        "SELECT status, evidence_ref FROM duplicate_recoveries"
+    ).fetchone()
+    assert recovery["status"] == "failed"
+    assert recovery["evidence_ref"].startswith("recovery not attempted:")
+    assert "does not match the current dialog" in recovery["evidence_ref"]
+
+
+class OrderRecordingController(InspectingController):
+    def __init__(self, repository, on_call=None):
+        super().__init__(repository)
+        self.order = []
+        self.on_call = on_call
+
+    def submit_once(self, item, session, physical_check, attempt_id):
+        self.order.append(item.id)
+        if self.on_call is not None:
+            self.on_call(len(self.order))
+        return super().submit_once(item, session, physical_check, attempt_id)
+
+
+def test_worker_submits_visible_page_items_first(tmp_path) -> None:
+    repository, item, _, session = make_repository(tmp_path / "scanner.sqlite3", item_count=4)
+    controller = OrderRecordingController(repository)
+    worker = ScanWorker(
+        repository,
+        item.task_id,
+        controller,
+        lambda _: session,
+        scan_interval=(0, 0, "none"),
+        priority_item_ids=("item-synthetic-2", "item-synthetic-3"),
+    )
+
+    worker.run()
+
+    assert controller.order == [
+        "item-synthetic-2",
+        "item-synthetic-3",
+        "item-synthetic-0",
+        "item-synthetic-1",
+    ]
+
+
+def test_worker_picks_up_priority_change_between_items(tmp_path) -> None:
+    repository, item, _, session = make_repository(tmp_path / "scanner.sqlite3", item_count=4)
+    holder = {}
+
+    def on_call(count):
+        if count == 1:
+            holder["worker"].set_priority_items(["item-synthetic-3"])
+
+    controller = OrderRecordingController(repository, on_call=on_call)
+    worker = ScanWorker(
+        repository, item.task_id, controller, lambda _: session, scan_interval=(0, 0, "none")
+    )
+    holder["worker"] = worker
+
+    worker.run()
+
+    assert controller.order == [
+        "item-synthetic-0",
+        "item-synthetic-3",
+        "item-synthetic-1",
+        "item-synthetic-2",
+    ]

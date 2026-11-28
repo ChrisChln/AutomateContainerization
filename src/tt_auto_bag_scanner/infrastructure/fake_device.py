@@ -30,6 +30,8 @@ class FakeDeviceAdapter:
         snapshots_after_enter: Iterable[str | Path] = (),
         snapshots_after_back: Iterable[str | Path] = (),
         snapshots_after_tap: Iterable[str | Path] = (),
+        snapshots_after_clear: Iterable[str | Path] = (),
+        snapshots_after_swipe: Iterable[str | Path] = (),
         package_name: str = "com.ss.android.pda",
         warehouse: str | None = None,
         carrier_configs: Iterable[CarrierConfig] = (),
@@ -48,6 +50,8 @@ class FakeDeviceAdapter:
         self._next_snapshots = [self._read(value) for value in snapshots_after_enter]
         self._next_back_snapshots = [self._read(value) for value in snapshots_after_back]
         self._next_tap_snapshots = [self._read(value) for value in snapshots_after_tap]
+        self._next_clear_snapshots = [self._read(value) for value in snapshots_after_clear]
+        self._next_swipe_snapshots = [self._read(value) for value in snapshots_after_swipe]
         self._entered_text: list[str] = []
         configs = tuple(carrier_configs)
         self._dynamic_mode = (
@@ -198,6 +202,21 @@ class FakeDeviceAdapter:
             self._dynamic_input = text
         self.simulated_action_count += 1
 
+    def swipe(self, x1: int, y1: int, x2: int, y2: int) -> None:
+        self.actions.append(("swipe", x1, y1, x2, y2))
+        self.simulated_action_count += 1
+        if self._next_swipe_snapshots:
+            self._current_xml = self._next_swipe_snapshots.pop(0)
+
+    def clear_text(self) -> None:
+        self.actions.append(("clear_text",))
+        self.simulated_action_count += 1
+        if self._dynamic_mode:
+            self._dynamic_input = ""
+            return
+        if self._next_clear_snapshots:
+            self._current_xml = self._next_clear_snapshots.pop(0)
+
     def press_key(self, key: str) -> None:
         normalized = key.upper()
         self.actions.append(("press_key", normalized))
@@ -212,7 +231,15 @@ class FakeDeviceAdapter:
 
     def _dynamic_press(self, key: str) -> None:
         if key == "BACK":
-            if self._dynamic_page in {"bag_ready", "scan_result"}:
+            if self._dynamic_page == "duplicate_dialog":
+                self._dynamic_page = "bag_ready"
+                self._dynamic_pending_duplicate = ""
+                self._dynamic_input = ""
+                self._dynamic_status = ""
+                self._dynamic_error = ""
+                self._dynamic_logid = ""
+                self._dynamic_back_once = False
+            elif self._dynamic_page in {"bag_ready", "scan_result"}:
                 if not self._dynamic_back_once:
                     self._dynamic_back_once = True
                 else:
